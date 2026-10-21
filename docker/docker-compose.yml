@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  pizza_sql_server:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: vesuvio_sql_server
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "SenhaForte@2026!"
+    ports:
+      - "1433:1433"
+    volumes:
+      - vesuvio_sqlserver_data:/var/opt/mssql
+
+volumes:
+  vesuvio_sqlserver_data:
