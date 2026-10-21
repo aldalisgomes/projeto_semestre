@@ -23,7 +23,7 @@ The core objective was to restructure a relational database that suffered from r
 
 ## Project Structure
 ```text
-pizza-place-sales/
+projeto_semestre/
 ├── data/
 │   ├── data_dictionary.csv
 │   ├── order_details.csv
@@ -38,7 +38,6 @@ pizza-place-sales/
 ├── 03_analysis_queries.sql
 ├── Dockerfile
 ├── Makefile
-├── projeto 1 - pizzaria (2).pdf
 ├── README.md
 └── requirements.txt
 ```
@@ -83,7 +82,7 @@ pizza-place-sales/
 Open your Linux terminal (or WSL/Git Bash on Windows) and run:
 ```bash
 git clone https://github.com/aldalisgomes/projeto_semestre
-cd pizza-place-sales
+cd projeto_semestre
 ```
 
 ### 3. Start the Infrastructure (SQL Server)
