@@ -126,13 +126,13 @@ code .
   * Press Ctrl+Shift+P (or F1) to open the Command Palette.
   * Type and select: MS SQL: Add Connection.
   * Fill in the exact credentials as prompted step-by-step:
+    * Profile Name: Choose a friendly name (e.g., Pizza Local).
     * Server name: localhost,1433
-    * Database name: PizzaSales
     * Authentication Type: SQL Login
     * User name: sa
     * Password: SenhaForte@2026!
+    * Database name: PizzaSales
     * Trust server certificate: Yes
-    * Profile Name: Choose a friendly name (e.g., Pizza Local).
 * **Execute the Queries:** Open the 03_analysis_queries.sql file, highlight the specific block of the query you want to test, and press Ctrl+Shift+E (or right-click and select "Execute Query"). The results will appear instantly in a side panel.
 
 ### 6. Tear Down & Clean Up
