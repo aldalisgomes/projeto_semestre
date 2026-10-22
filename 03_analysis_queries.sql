@@ -93,7 +93,8 @@ SELECT
     o.date AS Order_Date,
     COUNT(DISTINCT o.order_id) AS Total_Orders,
     SUM(od.quantity) AS Total_Pizzas_Sold,
-    AVG(CAST(od.quantity AS DECIMAL(5,2))) AS Avg_Pizzas_Per_Order
+    CAST(SUM(od.quantity) AS DECIMAL(10,2))
+        / NULLIF(COUNT(DISTINCT o.order_id), 0) AS Avg_Pizzas_Per_Order
 FROM orders o
 JOIN order_details od ON o.order_id = od.order_id
 GROUP BY o.date
@@ -165,7 +166,7 @@ WHERE c.category_name = 'Classic';
 
 
 -- 5.3. EXCEPT (Returns results from the first query MINUS those in the second)
--- Ex: Which ingredients exist in 'Veggie' category that NEVER appear in 'Meat'?
+-- Ex: Which ingredients exist in 'Veggie' category that NEVER appear in 'Chicken'?
 SELECT i.ingredient_name
 FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
@@ -180,5 +181,5 @@ FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
 JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
 JOIN categories c ON pt.category_id = c.category_id
-WHERE c.category_name = 'Meat';
+WHERE c.category_name = 'Chicken';
 

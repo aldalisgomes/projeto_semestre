@@ -1,6 +1,6 @@
 # Manual: previsão de demanda para uma pizzaria de bairro
 
-> **Recomendação principal: preserve tudo o que já foi feito no projeto.** A atualização está nos arquivos do modelo; o ETL, as consultas SQL, o README e os dados originais continuam como estavam. Para outra pizzaria, o único arquivo de entrada continua sendo um CSV com duas colunas: `date` e `quantity`.
+> **Recomendação principal: preserve o trabalho já feito no projeto.** O modelo usa as tabelas `orders` e `order_details` exportadas após a limpeza e normalização; não substitui nem altera o ETL, o esquema relacional ou os dados brutos. Para outra pizzaria, o único arquivo de entrada continua sendo um CSV com duas colunas: `date` e `quantity`.
 
 ## O que o modelo prevê
 
@@ -25,7 +25,7 @@ date,quantity
 - O modelo precisa de pelo menos 56 dias completos; para decisões mais estáveis, prefira 6 a 12 meses de histórico recente.
 - Use sempre a mesma unidade. Não misture pizzas, pedidos, itens e valores em reais.
 
-No projeto existente, o script continua juntando `orders.csv` e `order_details.csv` e somando `quantity` por data. Como nesses arquivos só há registros de pedidos, datas sem pedidos são completadas como zero. Para o CSV externo, preencha os zeros explicitamente.
+No projeto existente, o script lê `data/normalized/orders.csv` e `data/normalized/order_details.csv`, relaciona as tabelas pela chave `order_id` e soma `quantity` por data. Assim, a previsão parte da camada tratada e normalizada pelo projeto. Como essas tabelas registram pedidos, datas sem pedidos são completadas como zero. Para preparar ou atualizar os CSVs normalizados, execute `python src/04_exportar_base_normalizada.py`. Para o CSV externo, preencha os zeros explicitamente.
 
 ## Variáveis que o script calcula
 
@@ -55,21 +55,22 @@ Ele compara o modelo com uma referência simples: repetir a venda do mesmo dia d
 
 A faixa mostrada junto à previsão é `previsão +/- MAE` observado no backtest. É uma referência operacional, não um intervalo de confiança nem uma garantia. Considere uma margem adicional em feriados, promoções, eventos e dias de alta procura.
 
-## Gráfico
+## Visualização
 
-Cada execução salva `grafico_previsao_regressao_linear.png` na raiz do projeto. O gráfico apresenta as vendas reais recentes, as previsões do período de avaliação e os próximos sete dias, com uma faixa indicativa baseada no MAE. Para salvar em outro local, use `--graph-output caminho/para/grafico.png`.
+O gráfico interativo de histórico e previsão é exibido na aba **Previsão** do dashboard Streamlit. A execução do script pelo terminal mostra as métricas e a tabela dos próximos sete dias; ela não cria um PNG separado. Se usar `--output`, o script também salva a tabela prevista em CSV.
 
 ## Como executar
 
-Abra o terminal na pasta raiz do projeto e instale as dependências isoladas do modelo:
+Abra o terminal na pasta raiz do projeto e instale as dependências consolidadas do projeto:
 
 ```bash
-python -m pip install -r requirements-ml.txt
+python -m pip install -r requirements.txt
 ```
 
-Com os dados do projeto:
+Com os dados do projeto (depois de gerar/atualizar a camada normalizada):
 
 ```bash
+python src/04_exportar_base_normalizada.py
 python src/02_regressao_linear_vendas_diarias.py
 ```
 

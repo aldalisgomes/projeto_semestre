@@ -1,0 +1,33 @@
+﻿pizza_type_id,name,category_id
+bbq_ckn,The Barbecue Chicken Pizza,1
+cali_ckn,The California Chicken Pizza,1
+ckn_alfredo,The Chicken Alfredo Pizza,1
+ckn_pesto,The Chicken Pesto Pizza,1
+southw_ckn,The Southwest Chicken Pizza,1
+thai_ckn,The Thai Chicken Pizza,1
+big_meat,The Big Meat Pizza,2
+classic_dlx,The Classic Deluxe Pizza,2
+hawaiian,The Hawaiian Pizza,2
+ital_cpcllo,The Italian Capocollo Pizza,2
+napolitana,The Napolitana Pizza,2
+pep_msh_pep,"The Pepperoni, Mushroom, and Peppers Pizza",2
+pepperoni,The Pepperoni Pizza,2
+the_greek,The Greek Pizza,2
+brie_carre,The Brie Carre Pizza,3
+calabrese,The Calabrese Pizza,3
+ital_supr,The Italian Supreme Pizza,3
+peppr_salami,The Pepper Salami Pizza,3
+prsc_argla,The Prosciutto and Arugula Pizza,3
+sicilian,The Sicilian Pizza,3
+soppressata,The Soppressata Pizza,3
+spicy_ital,The Spicy Italian Pizza,3
+spinach_supr,The Spinach Supreme Pizza,3
+five_cheese,The Five Cheese Pizza,4
+four_cheese,The Four Cheese Pizza,4
+green_garden,The Green Garden Pizza,4
+ital_veggie,The Italian Vegetables Pizza,4
+mediterraneo,The Mediterranean Pizza,4
+mexicana,The Mexicana Pizza,4
+spin_pesto,The Spinach Pesto Pizza,4
+spinach_fet,The Spinach and Feta Pizza,4
+veggie_veg,The Vegetables + Vegetables Pizza,4

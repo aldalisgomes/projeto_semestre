@@ -1,3 +1,7 @@
+numpy
 pandas
-sqlalchemy
+plotly
 pyodbc
+scikit-learn
+sqlalchemy
+streamlit

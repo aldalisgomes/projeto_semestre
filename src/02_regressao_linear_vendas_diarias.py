@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -56,12 +55,14 @@ def load_daily_sales(daily_csv: Path | None) -> tuple[pd.DataFrame, int]:
                 f"Colunas ausentes: {', '.join(sorted(missing_columns))}"
             )
     else:
-        orders_path = PROJECT_ROOT / "data" / "orders.csv"
-        details_path = PROJECT_ROOT / "data" / "order_details.csv"
+        orders_path = PROJECT_ROOT / "data" / "normalized" / "orders.csv"
+        details_path = PROJECT_ROOT / "data" / "normalized" / "order_details.csv"
         if not orders_path.is_file() or not details_path.is_file():
             raise FileNotFoundError(
-                "Não encontrei data/orders.csv e data/order_details.csv. "
-                "Informe um arquivo com --daily-csv."
+                "Não encontrei data/normalized/orders.csv e "
+                "data/normalized/order_details.csv. Gere as tabelas tratadas com "
+                "'python src/04_exportar_base_normalizada.py' ou informe um CSV diário "
+                "com --daily-csv."
             )
 
         orders = pd.read_csv(orders_path, usecols=["order_id", "date"])
@@ -206,64 +207,6 @@ def evaluate_walk_forward(
     return metrics, backtest
 
 
-def save_forecast_chart(
-    daily: pd.DataFrame,
-    backtest: pd.DataFrame,
-    forecast_table: pd.DataFrame,
-    mae: float,
-    chart_path: Path,
-) -> Path:
-    """Salva um gráfico de histórico, backtest e previsão futura."""
-    chart_path = chart_path.expanduser().resolve()
-    chart_path.parent.mkdir(parents=True, exist_ok=True)
-
-    last_history_date = pd.Timestamp(daily["date"].iloc[-1])
-    visible_start = last_history_date - pd.Timedelta(days=55)
-    visible_history = daily[daily["date"] >= visible_start]
-    visible_backtest = backtest[backtest["date"] >= visible_start]
-    forecast_dates = pd.to_datetime(forecast_table["date"])
-    predicted = forecast_table["predicted_pizzas"].to_numpy(dtype=float)
-    lower = np.maximum(0, predicted - mae)
-    upper = predicted + mae
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(visible_history["date"], visible_history["quantity"], color="#176B87", label="Vendas reais")
-    ax.plot(
-        visible_backtest["date"],
-        visible_backtest["predicted"],
-        color="#E07A2D",
-        linestyle="--",
-        label="Previsão no período de avaliação",
-    )
-    ax.plot(
-        forecast_dates,
-        predicted,
-        color="#A8325A",
-        marker="o",
-        linewidth=2,
-        label="Previsão dos próximos 7 dias",
-    )
-    ax.fill_between(
-        forecast_dates,
-        lower,
-        upper,
-        color="#A8325A",
-        alpha=0.16,
-        label="Faixa indicativa de ± MAE",
-    )
-    ax.axvline(forecast_dates.iloc[0], color="#777777", linestyle=":", linewidth=1)
-    ax.set_title("Demanda diária de pizzas: histórico, avaliação e previsão")
-    ax.set_xlabel("Data")
-    ax.set_ylabel("Pizzas vendidas")
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="best")
-    fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(chart_path, dpi=160, bbox_inches="tight")
-    plt.close(fig)
-    return chart_path
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prevê vendas diárias para sete dias usando apenas date e quantity."
@@ -274,12 +217,6 @@ def parse_args() -> argparse.Namespace:
         help="CSV diário com as colunas date e quantity; sem isso usa os dados atuais do projeto.",
     )
     parser.add_argument("--output", type=Path, help="Opcional: caminho para salvar as previsões em CSV.")
-    parser.add_argument(
-        "--graph-output",
-        type=Path,
-        default=PROJECT_ROOT / "grafico_previsao_regressao_linear.png",
-        help="Caminho do gráfico PNG (padrão: arquivo na raiz do projeto).",
-    )
     return parser.parse_args()
 
 
@@ -302,7 +239,7 @@ def main() -> None:
     if len(daily) - test_size < 35:
         raise ValueError("O período de treino precisa ter pelo menos 35 dias completos.")
 
-    metrics, backtest = evaluate_walk_forward(daily, test_size)
+    metrics, _ = evaluate_walk_forward(daily, test_size)
     origin_date = pd.Timestamp(daily["date"].iloc[0])
     full_history = daily.set_index("date")["quantity"].astype(float)
     x_all, y_all = make_training_data(full_history, origin_date)
@@ -341,9 +278,6 @@ def main() -> None:
     print("\nPrevisão para os próximos sete dias:")
     print("(faixa indicativa = previsão +/- MAE do backtest; não é intervalo de confiança)")
     print(forecast_table.to_string(index=False))
-
-    chart_path = save_forecast_chart(daily, backtest, forecast_table, mae, args.graph_output)
-    print(f"\nGráfico salvo em: {chart_path}")
 
     if args.output:
         output_path = args.output.expanduser().resolve()
