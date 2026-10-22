@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   pizza_sql_server:
     image: mcr.microsoft.com/mssql/server:2022-latest

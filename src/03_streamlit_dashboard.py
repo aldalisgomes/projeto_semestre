@@ -316,7 +316,7 @@ def prepare_sales(
     merged = merged.dropna(subset=["order_datetime"])
     merged["revenue"] = merged["quantity"] * merged["price"]
     merged["hour"] = merged["order_datetime"].dt.hour
-    merged["weekday_num"] = merged["order_datetime"].dt.dayofweek
+    merged["weekday_num"] = merged["order_datetime"].dt.day_of_week
     merged["weekday"] = pd.Categorical(
         merged["weekday_num"].map(dict(enumerate(DAY_NAMES))),
         categories=DAY_NAMES,
@@ -494,7 +494,7 @@ def prepare_normalized_sales(
     sales = sales.dropna(subset=["order_datetime"])
     sales["revenue"] = sales["quantity"] * sales["price"]
     sales["hour"] = sales["order_datetime"].dt.hour
-    sales["weekday_num"] = sales["order_datetime"].dt.dayofweek
+    sales["weekday_num"] = sales["order_datetime"].dt.day_of_week
     sales["weekday"] = pd.Categorical(
         sales["weekday_num"].map(dict(enumerate(DAY_NAMES))),
         categories=DAY_NAMES,
@@ -616,7 +616,7 @@ def load_sql_server(database_url: str) -> tuple[pd.DataFrame, dict[str, int]]:
     sales = sales.dropna(subset=["order_datetime", "quantity", "price"])
     sales["revenue"] = sales["quantity"] * sales["price"]
     sales["hour"] = sales["order_datetime"].dt.hour
-    sales["weekday_num"] = sales["order_datetime"].dt.dayofweek
+    sales["weekday_num"] = sales["order_datetime"].dt.day_of_week
     sales["weekday"] = pd.Categorical(
         sales["weekday_num"].map(dict(enumerate(DAY_NAMES))),
         categories=DAY_NAMES,
@@ -1012,7 +1012,7 @@ def main() -> None:
             }
             for table_name in table_order
         ]
-        st.dataframe(pd.DataFrame(table_rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
         st.markdown(
             "**Relacionamentos aplicados:** `orders 1:N order_details`; `pizzas 1:N order_details`; "
             "`pizza_types 1:N pizzas`; `categories 1:N pizza_types`; e "
@@ -1054,7 +1054,7 @@ def main() -> None:
             st.caption(f"Executada em: {execution_source}")
             if result.empty:
                 st.info("A consulta foi executada sem erros e não retornou linhas.")
-            st.dataframe(result, hide_index=True, use_container_width=True)
+            st.dataframe(result, hide_index=True, width="stretch")
         except Exception as error:
             st.error(f"Não foi possível carregar ou executar a consulta: {error}")
 
@@ -1077,7 +1077,7 @@ def main() -> None:
             )
             revenue_fig.update_traces(line_color="#176B87")
             revenue_fig.update_layout(hovermode="x unified")
-            st.plotly_chart(revenue_fig, use_container_width=True)
+            st.plotly_chart(revenue_fig, width="stretch")
         with right:
             quantity_fig = px.line(
                 daily_summary,
@@ -1089,7 +1089,7 @@ def main() -> None:
             )
             quantity_fig.update_traces(line_color="#E07A2D")
             quantity_fig.update_layout(hovermode="x unified")
-            st.plotly_chart(quantity_fig, use_container_width=True)
+            st.plotly_chart(quantity_fig, width="stretch")
 
         st.subheader("Resumo por dia da semana")
         weekday_summary = (
@@ -1106,7 +1106,7 @@ def main() -> None:
             color="pizzas",
             color_continuous_scale="Oranges",
         )
-        st.plotly_chart(weekday_fig, use_container_width=True)
+        st.plotly_chart(weekday_fig, width="stretch")
 
     with menu_tab:
         st.subheader("Desempenho do cardápio")
@@ -1130,7 +1130,7 @@ def main() -> None:
                 title="Receita bruta por categoria",
                 labels={"category": "Categoria", "receita": "Receita (moeda da base)"},
             )
-            st.plotly_chart(category_fig, use_container_width=True)
+            st.plotly_chart(category_fig, width="stretch")
         with size_col:
             size_summary = filtered.groupby("size", as_index=False).agg(pizzas=("quantity", "sum"))
             size_fig = px.pie(
@@ -1140,14 +1140,14 @@ def main() -> None:
                 title="Participação dos tamanhos nas unidades vendidas",
                 hole=0.45,
             )
-            st.plotly_chart(size_fig, use_container_width=True)
+            st.plotly_chart(size_fig, width="stretch")
 
         st.markdown("**Pizzas mais vendidas**")
         display_products = top_products.head(15).copy()
         display_products["receita"] = display_products["receita"].map(
             lambda amount: format_money(float(amount), currency_symbol)
         )
-        st.dataframe(display_products, hide_index=True, use_container_width=True)
+        st.dataframe(display_products, hide_index=True, width="stretch")
 
     with peak_tab:
         st.subheader("Quando a pizzaria recebe mais pedidos?")
@@ -1169,12 +1169,12 @@ def main() -> None:
             title="Mapa de calor: pizzas vendidas por dia e hora",
         )
         heatmap_fig.update_xaxes(tickmode="array", tickvals=list(range(24)), ticktext=[f"{hour:02d}h" for hour in range(24)])
-        st.plotly_chart(heatmap_fig, use_container_width=True)
+        st.plotly_chart(heatmap_fig, width="stretch")
 
         hourly_summary = filtered.groupby("hour", as_index=False).agg(pizzas=("quantity", "sum"), pedidos=("order_id", "nunique"))
         busiest = hourly_summary.sort_values("pizzas", ascending=False).head(5)
         st.markdown("**Cinco horas com maior volume**")
-        st.dataframe(busiest, hide_index=True, use_container_width=True)
+        st.dataframe(busiest, hide_index=True, width="stretch")
 
     with ingredient_tab:
         st.subheader("Ingredientes associados às vendas")
@@ -1216,8 +1216,8 @@ def main() -> None:
                 color="pizzas em receitas com o ingrediente",
                 color_continuous_scale="Oranges",
             )
-            st.plotly_chart(ingredient_fig, use_container_width=True)
-            st.dataframe(ingredient_summary, hide_index=True, use_container_width=True)
+            st.plotly_chart(ingredient_fig, width="stretch")
+            st.dataframe(ingredient_summary, hide_index=True, width="stretch")
 
     with forecast_tab:
         st.subheader("Previsão de demanda para sete dias")
@@ -1259,7 +1259,7 @@ def main() -> None:
                 forecast_table = pd.DataFrame(
                     {
                         "Data": forecast_dates.date,
-                        "Dia": [DAY_NAMES[date.dayofweek] for date in forecast_dates],
+                        "Dia": [DAY_NAMES[date.day_of_week] for date in forecast_dates],
                         "Venda na semana anterior": np.rint(forecast_features["lag_7d"].to_numpy()).astype(int),
                         "Média móvel 7 dias": np.round(forecast_features["rolling_7d"].to_numpy(), 1),
                         "Previsão de pizzas": np.rint(predictions).astype(int),
@@ -1274,7 +1274,7 @@ def main() -> None:
                 metric_c.metric("R² no backtest", f"{metrics['r2']:.3f}")
                 if metrics["mae"] > metrics["baseline_mae"]:
                     st.warning("Neste histórico, a regressão teve erro maior que repetir as vendas da semana anterior.")
-                st.dataframe(forecast_table, hide_index=True, use_container_width=True)
+                st.dataframe(forecast_table, hide_index=True, width="stretch")
 
                 fig = go.Figure()
                 recent_start = forecast_daily["date"].max() - pd.Timedelta(days=55)
@@ -1292,7 +1292,7 @@ def main() -> None:
                     hovermode="x unified",
                     legend_title="Série",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 st.caption("A faixa previsão ± MAE é indicativa, não um intervalo de confiança. A previsão inicia no dia seguinte ao fim do período selecionado.")
             except Exception as error:
                 st.error(f"Não foi possível calcular a previsão: {error}")
