@@ -15,17 +15,17 @@ make setup
 make dashboard
 ```
 
-`make setup` cria o ambiente `.venv` e instala as dependências do `requirements.txt`. `make dashboard` atualiza primeiro os CSVs normalizados e inicia o painel em `http://localhost:8501`. Esse alvo configura `PIZZA_DATABASE_URL` para tentar o SQL Server local; se ele não estiver acessível, o painel continua usando `data/normalized/`.
+`make setup` cria o ambiente `.venv` e instala as dependências do `requirements.txt`. `make dashboard` atualiza primeiro os CSVs normalizados, inicia o painel em `http://localhost:8501` em modo headless e aguarda a porta responder. No WSL, abre o endereço no navegador padrão do Windows; em Linux com sessão gráfica, tenta `xdg-open`. Esse alvo configura `PIZZA_DATABASE_URL` para tentar o SQL Server local; se ele não estiver acessível, o painel continua usando `data/normalized/`.
 
 Também é possível executar as etapas manualmente. Na pasta raiz, instale as dependências e exporte as tabelas normalizadas:
 
 ```bash
 python -m pip install -r requirements.txt
 python src/04_exportar_base_normalizada.py
-streamlit run src/03_streamlit_dashboard.py
+streamlit run src/03_streamlit_dashboard.py --server.headless true
 ```
 
-O Streamlit abrirá o painel no navegador. Por padrão, **não analisa diretamente os CSVs desnormalizados**: lê as sete tabelas já tratadas em `data/normalized/`. A nova aba **ETL e modelo** mostra a quantidade de registros carregada de cada tabela e os relacionamentos usados nos indicadores. Para usar o banco operacional, escolha **Banco SQL Server normalizado**; essa fonte consulta diretamente as tabelas do banco por `SELECT`.
+Com a execução manual, abra `http://localhost:8501` no navegador. O modo headless evita que o Ubuntu do WSL tente abrir um navegador Linux. Por padrão, **o painel não analisa diretamente os CSVs desnormalizados**: lê as sete tabelas já tratadas em `data/normalized/`. A aba **ETL e modelo** mostra a quantidade de registros carregada de cada tabela e os relacionamentos usados nos indicadores. Para usar o banco operacional, escolha **Banco SQL Server normalizado**; essa fonte consulta diretamente as tabelas do banco por `SELECT`.
 
 ## Comandos do Makefile
 
@@ -38,8 +38,8 @@ Use estes comandos na raiz do repositório, em WSL/Ubuntu com Docker Desktop int
 | `make db-up` | Sobe o SQL Server e aguarda a mensagem de prontidão. |
 | `make run` | Constrói a imagem e executa o ETL existente no SQL Server. |
 | `make normalize` | Executa `src/04_exportar_base_normalizada.py` e atualiza as sete tabelas CSV. |
-| `make dashboard` | Atualiza as tabelas normalizadas e inicia o Streamlit local na porta `8501`. |
-| `make dashboard-docker` | Inicia/aguarda o SQL Server, exporta os CSVs com o container da aplicação e executa o Streamlit Docker com a porta `8501` publicada; não exige Python/ODBC no WSL. |
+| `make dashboard` | Atualiza as tabelas, inicia o Streamlit local em modo headless e abre o navegador quando a porta `8501` responde. |
+| `make dashboard-docker` | Inicia/aguarda o SQL Server, exporta os CSVs com o container da aplicação e executa o Streamlit headless no Docker; abre o navegador após a porta `8501` responder e não exige Python/ODBC no WSL. |
 | `make all` | Executa em sequência: banco, ETL, exportação normalizada no container e painel Docker. |
 | `make db-down` | Para e remove o container e a rede do SQL Server. |
 | `make clean` | Remove caches Python temporários. |

@@ -11,6 +11,8 @@ VENV_PYTHON = .venv/bin/python
 STREAMLIT_PORT ?= 8501
 # Password characters reserved by URLs are percent-encoded; credentials match docker-compose.yml.
 PIZZA_DATABASE_URL ?= mssql+pyodbc://sa:SenhaForte%402026%21@localhost:1433/PizzaSales?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes
+# Wait for the Streamlit port, then open Windows Explorer (WSL) or a GUI browser (Linux).
+OPEN_BROWSER = nohup bash -c 'for attempt in {1..60}; do if (echo > /dev/tcp/127.0.0.1/$(STREAMLIT_PORT)) >/dev/null 2>&1; then if command -v explorer.exe >/dev/null 2>&1 && explorer.exe "http://localhost:$(STREAMLIT_PORT)" >/dev/null 2>&1; then :; elif command -v xdg-open >/dev/null 2>&1 && { [ -n "$$DISPLAY" ] || [ -n "$$WAYLAND_DISPLAY" ]; }; then xdg-open "http://localhost:$(STREAMLIT_PORT)" >/dev/null 2>&1; fi; exit 0; fi; sleep 1; done' >/dev/null 2>&1 </dev/null &
 
 help: ## Show available commands
 	@echo "Usage: make [target]"
@@ -47,13 +49,15 @@ normalize: setup ## Generate/refresh the seven normalized CSV tables
 	$(VENV_PYTHON) src/04_exportar_base_normalizada.py
 
 dashboard: normalize ## Refresh normalized CSVs and run Streamlit locally on port 8501
-	PIZZA_DATABASE_URL='$(PIZZA_DATABASE_URL)' $(VENV_PYTHON) -m streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port $(STREAMLIT_PORT)
+	@$(OPEN_BROWSER)
+	PIZZA_DATABASE_URL='$(PIZZA_DATABASE_URL)' $(VENV_PYTHON) -m streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port $(STREAMLIT_PORT) --server.headless true
 
 dashboard-docker: db-up ## Export normalized CSVs and run Streamlit in Docker on port 8501
 	docker build -t $(IMAGE_NAME) .
 	@mkdir -p data/normalized
 	docker run --rm -v "$(CURDIR)/data:/app/data" $(IMAGE_NAME) python src/04_exportar_base_normalizada.py
-	docker run --rm --network $(PROJECT_NAME)_default -p $(STREAMLIT_PORT):8501 -e PIZZA_DATABASE_URL='mssql+pyodbc://sa:SenhaForte%402026%21@pizza_sql_server:1433/PizzaSales?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes' $(IMAGE_NAME) streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port 8501
+	@$(OPEN_BROWSER)
+	docker run --rm --network $(PROJECT_NAME)_default -p $(STREAMLIT_PORT):8501 -e PIZZA_DATABASE_URL='mssql+pyodbc://sa:SenhaForte%402026%21@pizza_sql_server:1433/PizzaSales?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes' $(IMAGE_NAME) streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
 
 all: db-up run dashboard-docker ## Start SQL Server, run ETL, export normalized tables and launch Docker dashboard
 	@:

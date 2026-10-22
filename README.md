@@ -156,7 +156,7 @@ make dashboard-docker     # normaliza e abre o Streamlit dentro do Docker
 make all                  # banco + ETL + CSVs normalizados + painel Docker
 ```
 
-`make dashboard` configura `PIZZA_DATABASE_URL` para tentar o SQL Server local. Se o banco não estiver disponível, os gráficos e a aba **Consultas SQL** continuam usando as tabelas normalizadas locais. `make dashboard-docker` gera os CSVs normalizados dentro do container e publica o painel em `http://localhost:8501`, sem exigir Python/ODBC instalados no WSL; para que a opção SQL Server dentro do painel tenha dados, execute antes `make run` ou use `make all`.
+`make dashboard` configura `PIZZA_DATABASE_URL` para tentar o SQL Server local. Se o banco não estiver disponível, os gráficos e a aba **Consultas SQL** continuam usando as tabelas normalizadas locais. Os alvos `dashboard` e `dashboard-docker` iniciam o Streamlit em modo headless para evitar a tentativa de abrir um navegador Linux no WSL; o Makefile aguarda a porta `8501` responder e então abre o navegador padrão do Windows. `make dashboard-docker` gera os CSVs normalizados dentro do container, sem exigir Python/ODBC no WSL; para que a opção SQL Server dentro do painel tenha dados, execute antes `make run` ou use `make all`.
 
 **Atenção:** o ETL existente executa o DDL de referência, que recria o banco `PizzaSales`. Portanto, `make run` e `make all` devem ser usados em ambiente de demonstração/teste, após proteger qualquer dado que precise ser mantido. Eles não são necessários para abrir o painel com a base normalizada local.
 
