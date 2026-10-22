@@ -8,25 +8,53 @@ O painel do Projeto Integrador IV reúne métricas úteis para a gestão de uma 
 
 ## Instalação e abertura
 
-Na pasta raiz do projeto, instale as dependências consolidadas do projeto:
+O caminho recomendado é abrir WSL/Ubuntu na pasta raiz do projeto e usar o GNU Make:
+
+```bash
+make setup
+make dashboard
+```
+
+`make setup` cria o ambiente `.venv` e instala as dependências do `requirements.txt`. `make dashboard` atualiza primeiro os CSVs normalizados e inicia o painel em `http://localhost:8501`. Esse alvo configura `PIZZA_DATABASE_URL` para tentar o SQL Server local; se ele não estiver acessível, o painel continua usando `data/normalized/`.
+
+Também é possível executar as etapas manualmente. Na pasta raiz, instale as dependências e exporte as tabelas normalizadas:
 
 ```bash
 python -m pip install -r requirements.txt
-```
-
-Gere (ou atualize) as cópias normalizadas locais. O script aplica as regras e validações do projeto e grava somente em `data/normalized/`:
-
-```bash
 python src/04_exportar_base_normalizada.py
-```
-
-Depois, inicie a interface:
-
-```bash
 streamlit run src/03_streamlit_dashboard.py
 ```
 
 O Streamlit abrirá o painel no navegador. Por padrão, **não analisa diretamente os CSVs desnormalizados**: lê as sete tabelas já tratadas em `data/normalized/`. A nova aba **ETL e modelo** mostra a quantidade de registros carregada de cada tabela e os relacionamentos usados nos indicadores. Para usar o banco operacional, escolha **Banco SQL Server normalizado**; essa fonte consulta diretamente as tabelas do banco por `SELECT`.
+
+## Comandos do Makefile
+
+Use estes comandos na raiz do repositório, em WSL/Ubuntu com Docker Desktop integrado:
+
+| Comando | O que faz |
+| --- | --- |
+| `make help` | Lista os alvos disponíveis. |
+| `make setup` | Cria `.venv` e instala `requirements.txt`. |
+| `make db-up` | Sobe o SQL Server e aguarda a mensagem de prontidão. |
+| `make run` | Constrói a imagem e executa o ETL existente no SQL Server. |
+| `make normalize` | Executa `src/04_exportar_base_normalizada.py` e atualiza as sete tabelas CSV. |
+| `make dashboard` | Atualiza as tabelas normalizadas e inicia o Streamlit local na porta `8501`. |
+| `make dashboard-docker` | Inicia/aguarda o SQL Server, exporta os CSVs com o container da aplicação e executa o Streamlit Docker com a porta `8501` publicada; não exige Python/ODBC no WSL. |
+| `make all` | Executa em sequência: banco, ETL, exportação normalizada no container e painel Docker. |
+| `make db-down` | Para e remove o container e a rede do SQL Server. |
+| `make clean` | Remove caches Python temporários. |
+
+**Cuidado com `make run` e `make all`:** o ETL atual executa o DDL de referência, que recria o banco `PizzaSales`. Use-os em uma base de demonstração/teste e proteja antes qualquer dado que precise ser mantido. Para abrir o painel com os CSVs normalizados, `make dashboard` é suficiente e não executa o ETL do SQL Server.
+
+## Aba Consultas SQL
+
+A aba **Consultas SQL** lê automaticamente `03_analysis_queries.sql` da raiz e separa as consultas numeradas, de `1.1` até `6.4`. O `selectbox` permite escolher uma delas; a interface exibe o SQL com realce de sintaxe e a tabela retornada.
+
+- Com **Banco SQL Server normalizado** selecionado, a consulta é executada diretamente no banco `PizzaSales`.
+- Com uma `PIZZA_DATABASE_URL` acessível e as sete tabelas do projeto disponíveis, o painel também usa o SQL Server.
+- Sem SQL Server acessível, a interface carrega `categories`, `pizza_types`, `ingredients`, `pizza_type_ingredients`, `pizzas`, `orders` e `order_details` de `data/normalized/` em um SQLite temporário na memória. O `SELECT TOP N` do T-SQL é convertido para `LIMIT N` nessa execução local.
+
+O fallback local exige as sete tabelas exportadas. Execute `make normalize` caso estejam ausentes ou desatualizadas. A aba consulta a base do projeto e não aplica os filtros de período/categoria/tamanho da barra lateral nem os CSVs externos enviados.
 
 ## Usar os dados de outra pizzaria
 

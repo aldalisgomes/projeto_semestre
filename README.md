@@ -29,11 +29,15 @@ projeto_semestre/
 │   ├── order_details.csv
 │   ├── orders.csv
 │   ├── pizza_types.csv
-│   └── pizzas.csv
+│   ├── pizzas.csv
+│   └── normalized/                 # sete tabelas exportadas pelo ETL
 ├── docker/
 │   └── docker-compose.yml
 ├── src/
-│   └── 01_etl_and_normalization.py
+│   ├── 01_etl_and_normalization.py
+│   ├── 02_regressao_linear_vendas_diarias.py
+│   ├── 03_streamlit_dashboard.py
+│   └── 04_exportar_base_normalizada.py
 ├── 02_create_tables_reference.sql
 ├── 03_analysis_queries.sql
 ├── Dockerfile
@@ -90,7 +94,7 @@ Use the provided Makefile to quickly spin up the database container:
 ```bash
 make db-up
 ```
-Note: Docker will create the docker_default network and spin up the SQL Server container on port 1433. Wait approximately 15 seconds for SQL Server to initialize before proceeding.
+Note: Docker Compose creates the `vesuvio_default` network and starts SQL Server on port 1433. The Makefile waits for the server readiness message before returning.
 
 ### 4. Run the ETL Pipeline
 Build the Python application container and run the complete ETL pipeline. This step builds the image, connects to the Docker network, audits data, applies normalization rules, and loads the SQL Server database:
@@ -139,9 +143,31 @@ make clean
 ```
 Tip: You can run make help at any time to see all available commands, including make setup for installing dependencies locally.
 
+### 7. Streamlit, consultas SQL e fluxo completo pelo Makefile
+
+Na raiz do projeto, em WSL/Ubuntu com GNU Make e Docker Desktop integrados, use:
+
+```bash
+make help                 # lista os comandos
+make setup                # cria .venv e instala requirements.txt
+make normalize            # exporta/atualiza as sete tabelas em data/normalized/
+make dashboard            # normaliza e abre o Streamlit local na porta 8501
+make dashboard-docker     # normaliza e abre o Streamlit dentro do Docker
+make all                  # banco + ETL + CSVs normalizados + painel Docker
+```
+
+`make dashboard` configura `PIZZA_DATABASE_URL` para tentar o SQL Server local. Se o banco não estiver disponível, os gráficos e a aba **Consultas SQL** continuam usando as tabelas normalizadas locais. `make dashboard-docker` gera os CSVs normalizados dentro do container e publica o painel em `http://localhost:8501`, sem exigir Python/ODBC instalados no WSL; para que a opção SQL Server dentro do painel tenha dados, execute antes `make run` ou use `make all`.
+
+**Atenção:** o ETL existente executa o DDL de referência, que recria o banco `PizzaSales`. Portanto, `make run` e `make all` devem ser usados em ambiente de demonstração/teste, após proteger qualquer dado que precise ser mantido. Eles não são necessários para abrir o painel com a base normalizada local.
+
+Na nova aba **Consultas SQL**, o painel lê os blocos numerados do `03_analysis_queries.sql`, exibe o código selecionado e mostra a tabela de resultado. Com as tabelas do projeto disponíveis, executa no SQL Server; sem SQL Server, carrega as sete tabelas de `data/normalized/` em SQLite em memória. As consultas não usam os filtros de data da barra lateral.
+
+Consulte [MANUAL_STREAMLIT.md](MANUAL_STREAMLIT.md) para detalhes sobre as fontes de dados, as consultas e os limites das métricas.
+
 ## Analytics Highlights
 The project includes an SQL script (03_analysis_queries.sql) containing:
 * **Complex Filtering:** Usage of BETWEEN, IN, LIKE, and exclusions to segment sales periods and pizza types.
 * **Joins:** INNER, LEFT, RIGHT, and FULL OUTER joins to combine normalized tables and identify data orphans.
 * **Subqueries:** Identifying top-priced items and calculating revenue percentage contributions by category.
 * **Set Operations:** UNION, INTERSECT, and EXCEPT to cross-reference ingredient usage across pizza categories.
+* **Advanced Analytics:** Market-basket pairs, revenue ranking by category, recipe-complexity filtering, and order segmentation using CTEs, self joins, window functions, and HAVING.

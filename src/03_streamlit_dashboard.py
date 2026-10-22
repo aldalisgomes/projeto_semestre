@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
+import sqlite3
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +23,17 @@ from sqlalchemy import create_engine, text
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = PROJECT_ROOT / "src" / "02_regressao_linear_vendas_diarias.py"
 NORMALIZED_DATA_DIR = PROJECT_ROOT / "data" / "normalized"
+ANALYSIS_QUERIES_PATH = PROJECT_ROOT / "03_analysis_queries.sql"
+NORMALIZED_TABLES = (
+    "categories",
+    "pizza_types",
+    "ingredients",
+    "pizza_type_ingredients",
+    "pizzas",
+    "orders",
+    "order_details",
+)
+QUERY_MARKER = re.compile(r"(?m)^--\s*(\d+\.\d+)\.\s*(.*?)\s*$")
 DAY_NAMES = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 REQUIRED_UPLOADS = {
     "orders": {"order_id", "date", "time"},
@@ -652,6 +665,147 @@ def load_uploaded_csvs(
     )
 
 
+def load_analysis_queries(path: Path = ANALYSIS_QUERIES_PATH) -> list[dict[str, str]]:
+    """Separa o arquivo de consultas em blocos numerados (por exemplo, 1.1 e 6.4)."""
+    sql_text = path.read_text(encoding="utf-8-sig")
+    markers = list(QUERY_MARKER.finditer(sql_text))
+    queries = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(sql_text)
+        query_text = sql_text[marker.end():end].strip()
+        if query_text:
+            queries.append(
+                {
+                    "number": marker.group(1),
+                    "title": marker.group(2).strip(),
+                    "sql": query_text,
+                }
+            )
+    if not queries:
+        raise ValueError("Nenhuma consulta numerada foi encontrada em 03_analysis_queries.sql.")
+    return queries
+
+
+def adapt_sqlite_query(query: str) -> str:
+    """Converte TOP N para LIMIT e adapta os JOINs das consultas do arquivo ao SQLite."""
+    top_match = re.search(r"\bSELECT\s+TOP\s+(\d+)\s+", query, flags=re.IGNORECASE)
+    limit = int(top_match.group(1)) if top_match else None
+    if top_match:
+        query = query[:top_match.start()] + "SELECT " + query[top_match.end():]
+
+    # RIGHT/FULL OUTER JOIN só existem em versões recentes do SQLite.
+    # Estas consultas fixas são reescritas como LEFT JOIN para compatibilidade com WSL antigo.
+    normalized_query = re.sub(r"\s+", " ", query).strip().rstrip(";")
+    if re.search(
+        r"\bRIGHT\s+JOIN\s+categories\s+c\s+ON\s+pt\.category_id\s*=\s*c\.category_id\b",
+        normalized_query,
+        re.IGNORECASE,
+    ):
+        query = re.sub(
+            r"FROM\s+pizza_types\s+pt\s+RIGHT\s+JOIN\s+categories\s+c\s+ON\s+pt\.category_id\s*=\s*c\.category_id",
+            "FROM categories c LEFT JOIN pizza_types pt ON pt.category_id = c.category_id",
+            query,
+            flags=re.IGNORECASE,
+        )
+    elif re.search(r"\bFULL\s+OUTER\s+JOIN\s+pizza_types\s+pt\b", normalized_query, re.IGNORECASE):
+        query = """
+SELECT p.pizza_id, pt.name
+FROM pizzas p
+LEFT JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
+WHERE p.pizza_id IS NOT NULL AND pt.pizza_type_id IS NULL
+UNION ALL
+SELECT p.pizza_id, pt.name
+FROM pizza_types pt
+LEFT JOIN pizzas p ON p.pizza_type_id = pt.pizza_type_id
+WHERE p.pizza_id IS NULL
+"""
+
+    query = query.strip().rstrip(";").strip()
+    if limit is not None:
+        query += f"\nLIMIT {limit}"
+    return query
+
+
+def execute_sqlite_analysis_query(query: str) -> pd.DataFrame:
+    """Carrega as sete tabelas normalizadas em SQLite em memória e executa a consulta."""
+    missing = [
+        table for table in NORMALIZED_TABLES
+        if not (NORMALIZED_DATA_DIR / f"{table}.csv").is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "A camada normalizada está incompleta. Gere os CSVs com `make normalize`. "
+            "Tabelas ausentes: " + ", ".join(missing)
+        )
+
+    signature = tuple(
+        (
+            table,
+            (NORMALIZED_DATA_DIR / f"{table}.csv").stat().st_mtime_ns,
+            (NORMALIZED_DATA_DIR / f"{table}.csv").stat().st_size,
+        )
+        for table in NORMALIZED_TABLES
+    )
+    return _execute_sqlite_analysis_query_cached(query, signature)
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _execute_sqlite_analysis_query_cached(
+    query: str,
+    signature: tuple[tuple[str, int, int], ...],
+) -> pd.DataFrame:
+    # signature invalida o cache quando `make normalize` atualiza qualquer tabela.
+    with sqlite3.connect(":memory:") as connection:
+        for table in NORMALIZED_TABLES:
+            dataframe = read_csv_path(NORMALIZED_DATA_DIR / f"{table}.csv")
+            dataframe.to_sql(table, connection, index=False, if_exists="replace")
+        return pd.read_sql_query(adapt_sqlite_query(query), connection)
+
+
+def sql_server_has_normalized_schema(database_url: str) -> bool:
+    """Confirma que o banco configurado contém as sete tabelas normalizadas do projeto."""
+    engine = None
+    try:
+        engine = create_engine(database_url, pool_pre_ping=True)
+        with engine.connect() as connection:
+            for table in NORMALIZED_TABLES:
+                connection.execute(text(f"SELECT TOP 0 * FROM dbo.{table}"))
+        return True
+    except Exception:
+        return False
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def execute_analysis_query(
+    query: str,
+    *,
+    database_url: str = "",
+    require_sql_server: bool = False,
+) -> tuple[pd.DataFrame, str]:
+    """Usa SQL Server se solicitado ou disponível; caso contrário usa SQLite local."""
+    if require_sql_server:
+        if not database_url:
+            raise ValueError("Configure PIZZA_DATABASE_URL para executar consultas no SQL Server.")
+        engine = create_engine(database_url, pool_pre_ping=True)
+        try:
+            with engine.connect() as connection:
+                return pd.read_sql(text(query), connection), "SQL Server · PizzaSales"
+        finally:
+            engine.dispose()
+
+    if database_url and sql_server_has_normalized_schema(database_url):
+        engine = create_engine(database_url, pool_pre_ping=True)
+        try:
+            with engine.connect() as connection:
+                return pd.read_sql(text(query), connection), "SQL Server · PizzaSales"
+        finally:
+            engine.dispose()
+
+    return execute_sqlite_analysis_query(query), "SQLite em memória · data/normalized/"
+
+
 def load_forecast_module():
     spec = importlib.util.spec_from_file_location("pizza_demand_model", MODEL_PATH)
     if spec is None or spec.loader is None:
@@ -824,8 +978,16 @@ def main() -> None:
     kpi4.metric("Ticket médio", format_money(average_ticket, currency_symbol))
     kpi5.metric("Pizzas por pedido", format_number(average_pizzas, 2))
 
-    overview_tab, menu_tab, peak_tab, ingredient_tab, forecast_tab, model_tab = st.tabs(
-        ["Visão geral", "Cardápio", "Picos de demanda", "Ingredientes", "Previsão", "ETL e modelo"]
+    overview_tab, menu_tab, peak_tab, ingredient_tab, forecast_tab, model_tab, sql_tab = st.tabs(
+        [
+            "Visão geral",
+            "Cardápio",
+            "Picos de demanda",
+            "Ingredientes",
+            "Previsão",
+            "ETL e modelo",
+            "Consultas SQL",
+        ]
     )
 
     with model_tab:
@@ -862,6 +1024,39 @@ def main() -> None:
         )
         st.markdown("**Auditoria desta carga**")
         st.json(quality)
+
+    with sql_tab:
+        st.subheader("Consultas SQL do projeto")
+        st.caption(
+            "Selecione uma consulta do arquivo 03_analysis_queries.sql. A execução usa o SQL Server "
+            "quando ele está conectado; sem essa conexão, usa as sete tabelas normalizadas locais. "
+            "Os filtros laterais e os CSVs enviados não alteram estas consultas."
+        )
+        try:
+            available_queries = load_analysis_queries()
+            query_labels = [
+                f"{query['number']} · {query['title']}" for query in available_queries
+            ]
+            selected_label = st.selectbox("Consulta", query_labels, key="analysis_sql_query")
+            selected_query = available_queries[query_labels.index(selected_label)]
+            st.code(selected_query["sql"], language="sql")
+
+            query_database_url = (
+                database_url
+                if source == "Banco SQL Server normalizado"
+                else os.environ.get("PIZZA_DATABASE_URL", "").strip()
+            )
+            result, execution_source = execute_analysis_query(
+                selected_query["sql"],
+                database_url=query_database_url,
+                require_sql_server=(source == "Banco SQL Server normalizado"),
+            )
+            st.caption(f"Executada em: {execution_source}")
+            if result.empty:
+                st.info("A consulta foi executada sem erros e não retornou linhas.")
+            st.dataframe(result, hide_index=True, use_container_width=True)
+        except Exception as error:
+            st.error(f"Não foi possível carregar ou executar a consulta: {error}")
 
     with overview_tab:
         st.subheader("Evolução das vendas")

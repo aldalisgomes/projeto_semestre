@@ -183,3 +183,122 @@ JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
 JOIN categories c ON pt.category_id = c.category_id
 WHERE c.category_name = 'Chicken';
 
+
+---------------------------------------------------------------
+-- 6. ADVANCED ANALYTICS (CTEs, WINDOW FUNCTIONS, SELF JOIN, HAVING)
+---------------------------------------------------------------
+
+-- 6.1. Market Basket Analysis with CTE and Self Join
+-- Top 10 pizza flavor pairs purchased together in the same order.
+-- DISTINCT in the CTE prevents multiple sizes of a flavor from inflating pair counts.
+WITH OrderPizzaTypes AS (
+    SELECT DISTINCT
+        od.order_id,
+        p.pizza_type_id
+    FROM order_details od
+    INNER JOIN pizzas p ON od.pizza_id = p.pizza_id
+)
+SELECT TOP 10
+    pt1.name AS Pizza_1,
+    pt2.name AS Pizza_2,
+    COUNT(DISTINCT first_type.order_id) AS Orders_Together
+FROM OrderPizzaTypes first_type
+INNER JOIN OrderPizzaTypes second_type
+    ON first_type.order_id = second_type.order_id
+   AND first_type.pizza_type_id < second_type.pizza_type_id
+INNER JOIN pizza_types pt1 ON first_type.pizza_type_id = pt1.pizza_type_id
+INNER JOIN pizza_types pt2 ON second_type.pizza_type_id = pt2.pizza_type_id
+GROUP BY pt1.name, pt2.name
+ORDER BY Orders_Together DESC, pt1.name, pt2.name;
+
+
+-- 6.2. Top 2 menu pizzas by gross revenue within each category
+-- DENSE_RANK keeps ties and restarts the ranking for every category.
+WITH PizzaRevenue AS (
+    SELECT
+        c.category_name,
+        pt.name AS Pizza_Name,
+        SUM(od.quantity * p.price) AS Gross_Revenue
+    FROM order_details od
+    INNER JOIN pizzas p ON od.pizza_id = p.pizza_id
+    INNER JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
+    INNER JOIN categories c ON pt.category_id = c.category_id
+    GROUP BY c.category_name, pt.name
+), RankedPizzaRevenue AS (
+    SELECT
+        category_name,
+        Pizza_Name,
+        Gross_Revenue,
+        DENSE_RANK() OVER (
+            PARTITION BY category_name
+            ORDER BY Gross_Revenue DESC
+        ) AS Revenue_Rank
+    FROM PizzaRevenue
+)
+SELECT
+    category_name,
+    Pizza_Name,
+    Gross_Revenue,
+    Revenue_Rank
+FROM RankedPizzaRevenue
+WHERE Revenue_Rank <= 2
+ORDER BY category_name, Revenue_Rank, Pizza_Name;
+
+
+-- 6.3. Recipe complexity in 1NF with GROUP BY and HAVING
+-- Recipes with at least 7 distinct ingredients and their average menu price.
+WITH RecipeComplexity AS (
+    SELECT
+        pt.pizza_type_id,
+        pt.name AS Pizza_Name,
+        c.category_name,
+        COUNT(DISTINCT pti.ingredient_id) AS Ingredient_Count
+    FROM pizza_types pt
+    INNER JOIN categories c ON pt.category_id = c.category_id
+    INNER JOIN pizza_type_ingredients pti ON pt.pizza_type_id = pti.pizza_type_id
+    GROUP BY pt.pizza_type_id, pt.name, c.category_name
+    HAVING COUNT(DISTINCT pti.ingredient_id) >= 7
+)
+SELECT
+    rc.Pizza_Name,
+    rc.category_name,
+    rc.Ingredient_Count,
+    AVG(p.price) AS Average_Menu_Price
+FROM RecipeComplexity rc
+INNER JOIN pizzas p ON rc.pizza_type_id = p.pizza_type_id
+GROUP BY rc.Pizza_Name, rc.category_name, rc.Ingredient_Count
+ORDER BY rc.Ingredient_Count DESC, rc.Pizza_Name;
+
+
+-- 6.4. Order segmentation with CTE and CASE WHEN
+-- Average ticket is the average gross revenue per order in each profile.
+WITH OrderTotals AS (
+    SELECT
+        o.order_id,
+        SUM(od.quantity) AS Total_Pizzas,
+        SUM(od.quantity * p.price) AS Gross_Order_Revenue
+    FROM orders o
+    INNER JOIN order_details od ON o.order_id = od.order_id
+    INNER JOIN pizzas p ON od.pizza_id = p.pizza_id
+    GROUP BY o.order_id
+), SegmentedOrders AS (
+    SELECT
+        order_id,
+        Total_Pizzas,
+        Gross_Order_Revenue,
+        CASE
+            WHEN Total_Pizzas = 1 THEN '1. Individual (1 pizza)'
+            WHEN Total_Pizzas BETWEEN 2 AND 3 THEN '2. Pequeno Grupo (2 a 3 pizzas)'
+            ELSE '3. Família / Evento (4+ pizzas)'
+        END AS Order_Profile
+    FROM OrderTotals
+)
+SELECT
+    Order_Profile,
+    COUNT(*) AS Total_Orders,
+    SUM(Total_Pizzas) AS Total_Pizzas_Sold,
+    AVG(Gross_Order_Revenue) AS Average_Ticket
+FROM SegmentedOrders
+GROUP BY Order_Profile
+ORDER BY Order_Profile;
+
