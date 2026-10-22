@@ -3,7 +3,7 @@
 Uso na raiz do projeto:
     python src/04_exportar_base_normalizada.py
 
-As saídas vão para data/normalized/ e são lidas diretamente pelo dashboard.
+As saídas vão para data/normalized/ e são lidas diretamente pelo painel.
 As regras seguem src/01_etl_and_normalization.py e 02_create_tables_reference.sql.
 """
 

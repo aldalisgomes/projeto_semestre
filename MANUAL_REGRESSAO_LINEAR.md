@@ -1,10 +1,10 @@
-# Manual: previsão de demanda para uma pizzaria de bairro
+# Manual da previsão de demanda para uma pizzaria de bairro
 
 > **Recomendação principal: preserve o trabalho já feito no projeto.** O modelo usa as tabelas `orders` e `order_details` exportadas após a limpeza e normalização; não substitui nem altera o ETL, o esquema relacional ou os dados brutos. Para outra pizzaria, o único arquivo de entrada continua sendo um CSV com duas colunas: `date` e `quantity`.
 
 ## O que o modelo prevê
 
-O script `src/02_regressao_linear_vendas_diarias.py` estima a quantidade total de pizzas vendidas em cada um dos próximos sete dias. Ele usa regressão linear supervisionada: aprende com vendas históricas e mede seu erro em datas que ficaram fora do ajuste. Além da data e da quantidade, o script calcula variáveis úteis a partir dos próprios dados; não é necessário acrescentar colunas ao CSV.
+O programa `src/02_regressao_linear_vendas_diarias.py` estima a quantidade total de pizzas vendidas em cada um dos próximos sete dias. Ele usa regressão linear supervisionada: aprende com vendas históricas e mede seu erro em datas que ficaram fora do ajuste. Além da data e da quantidade, calcula variáveis úteis a partir dos próprios dados; não é necessário acrescentar colunas ao CSV.
 
 Esse primeiro modelo pode ajudar a planejar massa, compras de ingredientes, equipe e capacidade de produção. Ele prevê o total de pizzas, não o mix por sabor, tamanho ou canal.
 
@@ -21,13 +21,13 @@ date,quantity
 
 - `date`: data local no formato `AAAA-MM-DD`.
 - `quantity`: total de pizzas vendidas naquele dia.
-- Inclua todos os dias do calendário, inclusive dias fechados e dias sem vendas, com `quantity=0`. O script rejeita lacunas no CSV de outra pizzaria para não adivinhar se faltou venda ou faltou registro.
+- Inclua todos os dias do calendário, inclusive dias fechados e dias sem vendas, com `quantity=0`. O programa rejeita lacunas no CSV de outra pizzaria para não adivinhar se faltou venda ou faltou registro.
 - O modelo precisa de pelo menos 56 dias completos; para decisões mais estáveis, prefira 6 a 12 meses de histórico recente.
 - Use sempre a mesma unidade. Não misture pizzas, pedidos, itens e valores em reais.
 
-No projeto existente, o script lê `data/normalized/orders.csv` e `data/normalized/order_details.csv`, relaciona as tabelas pela chave `order_id` e soma `quantity` por data. Assim, a previsão parte da camada tratada e normalizada pelo projeto. Como essas tabelas registram pedidos, datas sem pedidos são completadas como zero. Para preparar ou atualizar os CSVs normalizados, execute `python src/04_exportar_base_normalizada.py`. Para o CSV externo, preencha os zeros explicitamente.
+No projeto existente, o programa lê `data/normalized/orders.csv` e `data/normalized/order_details.csv`, relaciona as tabelas pela chave `order_id` e soma `quantity` por data. Assim, a previsão parte da camada tratada e normalizada pelo projeto. Como essas tabelas registram pedidos, datas sem pedidos são completadas como zero. Para preparar ou atualizar os CSVs normalizados, execute `python src/04_exportar_base_normalizada.py`. Para o CSV externo, preencha os zeros explicitamente.
 
-## Variáveis que o script calcula
+## Variáveis calculadas pelo programa
 
 | Variável | Como é obtida | Uso prático |
 | --- | --- | --- |
@@ -40,11 +40,11 @@ No projeto existente, o script lê `data/normalized/orders.csv` e `data/normaliz
 
 O modelo não assume que a semana de pagamento sempre aumenta vendas: ele estima essa relação com os dados da loja. O indicador solicitado cobre os dias 1 a 10; outros calendários de pagamento podem exigir uma regra diferente.
 
-As variáveis de `lag_7d` e `rolling_7d` usam apenas vendas anteriores à data prevista. Ao projetar os sete dias futuros, o script prevê um dia por vez e usa as previsões anteriores como parte do histórico. Assim, não precisa de quantidades futuras no CSV.
+As variáveis de `lag_7d` e `rolling_7d` usam apenas vendas anteriores à data prevista. Ao projetar os sete dias futuros, o programa prevê um dia por vez e usa as previsões anteriores como parte do histórico. Assim, não precisa de quantidades futuras no CSV.
 
 ## Avaliação antes de usar
 
-O script faz uma avaliação cronológica walk-forward: reserva a parte mais recente do histórico, prevê esse período em blocos de até sete dias e só incorpora vendas reais depois que cada bloco termina. Isso simula uma rotina em que a previsão é atualizada semanalmente.
+O programa faz uma avaliação cronológica progressiva: reserva a parte mais recente do histórico, prevê esse período em blocos de até sete dias e só incorpora vendas reais depois que cada bloco termina. Isso simula uma rotina em que a previsão é atualizada semanalmente.
 
 Ele compara o modelo com uma referência simples: repetir a venda do mesmo dia da semana anterior (`lag_7d`). Se o MAE do modelo for maior do que o MAE dessa referência, o modelo não melhorou o método simples nesse histórico; revise os dados e não baseie compras apenas na regressão.
 
@@ -53,11 +53,11 @@ Ele compara o modelo com uma referência simples: repetir a venda do mesmo dia d
 - **R²**: medida de ajuste que pode ser negativa quando a previsão é pior do que usar a média do período avaliado.
 - **MAE de referência**: erro de repetir a venda do mesmo dia na semana anterior.
 
-A faixa mostrada junto à previsão é `previsão +/- MAE` observado no backtest. É uma referência operacional, não um intervalo de confiança nem uma garantia. Considere uma margem adicional em feriados, promoções, eventos e dias de alta procura.
+A faixa mostrada junto à previsão é `previsão +/- MAE` observado na avaliação cronológica. É uma referência operacional, não um intervalo de confiança nem uma garantia. Considere uma margem adicional em feriados, promoções, eventos e dias de alta procura.
 
 ## Visualização
 
-O gráfico interativo de histórico e previsão é exibido na aba **Previsão** do dashboard Streamlit. A execução do script pelo terminal mostra as métricas e a tabela dos próximos sete dias; ela não cria um PNG separado. Se usar `--output`, o script também salva a tabela prevista em CSV.
+O gráfico interativo de histórico e previsão é exibido na aba **Previsão** do painel Streamlit. A execução do programa pelo terminal mostra as métricas e a tabela dos próximos sete dias; ela não cria uma imagem PNG separada. Se usar `--output`, também salva a tabela prevista em CSV.
 
 ## Como executar
 
@@ -92,4 +92,4 @@ python src/02_regressao_linear_vendas_diarias.py --daily-csv caminho/para/vendas
 2. A regressão capta relações simples. Tendências, calendário de pagamento e mês podem não se repetir; acompanhe o erro mensalmente.
 3. Ainda não há variáveis explícitas de feriado, clima, promoção, falta de estoque, mudança de preço, delivery ou eventos do bairro. O modelo não consegue distinguir esses motivos apenas pelas duas colunas.
 4. Para prever compras por sabor ou ingredientes, o próximo passo é gerar históricos separados por produto ou categoria. A entrada diária mínima para este modelo permanece com duas colunas.
-5. A sazonalidade anual é difícil de confirmar com apenas um ano de dados. Use resultados de backtest e bom senso operacional antes de alterar compras ou escala.
+5. A sazonalidade anual é difícil de confirmar com apenas um ano de dados. Use os resultados da avaliação e o bom senso operacional antes de alterar compras ou escala.

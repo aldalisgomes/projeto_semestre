@@ -1,16 +1,16 @@
-Table,Field,Description
-orders,order_id,Unique identifier for each order placed by a table
-orders,date,Date the order was placed (entered into the system prior to cooking & serving)
-orders,time,Time the order was placed (entered into the system prior to cooking & serving)
-order_details,order_details_id,"Unique identifier for each pizza placed within each order (pizzas of the same type and size are kept in the same row, and the quantity increases)"
-order_details,order_id,Foreign key that ties the details in each order to the order itself
-order_details,pizza_id,"Foreign key that ties the pizza ordered to its details, like size and price"
-order_details,quantity,Quantity ordered for each pizza of the same type and size
-pizzas,pizza_id,Unique identifier for each pizza (constituted by its type and size)
-pizzas,pizza_type_id,Foreign key that ties each pizza to its broader pizza type
-pizzas,size,"Size of the pizza (Small, Medium, Large, X Large, or XX Large)"
-pizzas,price,Price of the pizza in USD
-pizza_types,pizza_type_id,Unique identifier for each pizza type
-pizza_types,name,Name of the pizza as shown in the menu
-pizza_types,category,"Category that the pizza fall under in the menu (Classic, Chicken, Supreme, or Veggie)"
-pizza_types,ingredients,"Comma-delimited ingredients used in the pizza as shown in the menu (they all include Mozzarella Cheese, even if not specified; and they all include Tomato Sauce, unless another sauce is specified)"
+Tabela,Campo,Descrição
+orders,order_id,Identificador único de cada pedido realizado
+orders,date,"Data em que o pedido foi registrado no sistema, antes do preparo e da entrega"
+orders,time,"Horário em que o pedido foi registrado no sistema, antes do preparo e da entrega"
+order_details,order_details_id,"Identificador único de cada item de pizza em um pedido; pizzas do mesmo tipo e tamanho ficam na mesma linha, e a quantidade é registrada nesse campo"
+order_details,order_id,Chave estrangeira que relaciona os itens ao pedido correspondente
+order_details,pizza_id,"Chave estrangeira que relaciona a pizza pedida aos seus detalhes, como tamanho e preço"
+order_details,quantity,Quantidade pedida de cada pizza do mesmo tipo e tamanho
+pizzas,pizza_id,Identificador único de cada combinação de tipo e tamanho de pizza
+pizzas,pizza_type_id,Chave estrangeira que relaciona cada pizza ao respectivo tipo
+pizzas,size,"Tamanho da pizza (pequena, média, grande, extragrande ou tamanho família)"
+pizzas,price,Preço da pizza em dólares americanos (USD)
+pizza_types,pizza_type_id,Identificador único de cada tipo de pizza
+pizza_types,name,Nome da pizza conforme apresentado no cardápio
+pizza_types,category,"Categoria da pizza no cardápio (Classic, Chicken, Supreme ou Veggie)"
+pizza_types,ingredients,"Ingredientes separados por vírgula conforme apresentados no cardápio; a regra de tratamento inclui Mozzarella Cheese e inclui Tomato Sauce quando a receita original não especifica outro molho"

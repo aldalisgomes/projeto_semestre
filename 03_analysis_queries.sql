@@ -1,35 +1,35 @@
 USE PizzaSales;
 GO
 -- ============================================================
--- PROJECT: Pizza Place Sales - Advanced SQL Study
--- CONTENTS: Complex WHERE, LIKE, IN, BETWEEN, 
---           JOINS (INNER, LEFT, RIGHT, FULL), GROUP BY, 
---           Subqueries, and Set Operators.
+-- PROJETO: Vendas da Pizzaria - Estudo avançado de SQL
+-- CONTEÚDO: Condições WHERE, LIKE, IN e BETWEEN,
+--           junções (INNER, LEFT, RIGHT, FULL), GROUP BY,
+--           subconsultas e operações de conjuntos.
 -- ============================================================
 
 ---------------------------------------------------------------
--- 1. COMPLEX CONDITIONS, LIKE, IN, AND BETWEEN
+-- 1. CONDIÇÕES COMPLEXAS, LIKE, IN E BETWEEN
 ---------------------------------------------------------------
 
--- 1.1. Extract pizzas that cost between $15 and $20 and are size L or XL
--- (Usage of BETWEEN and IN)
+-- 1.1. Selecionar pizzas com preço entre US$ 15 e US$ 20 e tamanho L ou XL
+-- (Uso de BETWEEN e IN)
 SELECT 
-    pizza_id,
-    pizza_type_id,
-    size,
-    price
+    pizza_id AS Id_Pizza,
+    pizza_type_id AS Id_Tipo_Pizza,
+    size AS Tamanho,
+    price AS Preco
 FROM pizzas
 WHERE price BETWEEN 15.00 AND 20.00
   AND size IN ('L', 'XL');
 
 
--- 1.2. Find pizzas that have 'Chicken' in their name, BUT ARE NOT size 'S'
--- (Usage of LIKE, AND, and NOT)
+-- 1.2. Selecionar pizzas cujo nome contém 'Chicken', mas que não são tamanho S
+-- (Uso de LIKE, AND e NOT)
 SELECT 
-    p.pizza_id,
-    pt.name,
-    p.size,
-    p.price
+    p.pizza_id AS Id_Pizza,
+    pt.name AS Nome_da_Pizza,
+    p.size AS Tamanho,
+    p.price AS Preco
 FROM pizzas p
 JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
 WHERE pt.name LIKE '%Chicken%' 
@@ -37,118 +37,118 @@ WHERE pt.name LIKE '%Chicken%'
 
 
 ---------------------------------------------------------------
--- 2. WORKING WITH MULTIPLE TABLES (JOINS)
+-- 2. CONSULTAS COM MÚLTIPLAS TABELAS (JOINS)
 ---------------------------------------------------------------
 
--- 2.1. INNER JOIN (Returns only matching records from both tables)
--- Ex: Order details alongside pizza name and category
+-- 2.1. INNER JOIN (retorna somente registros correspondentes nas duas tabelas)
+-- Exemplo: itens de pedidos com o nome da pizza e sua categoria
 SELECT TOP 100
-    od.order_id,
-    pt.name AS Pizza_Name,
-    c.category_name,
-    od.quantity
+    od.order_id AS Id_Pedido,
+    pt.name AS Nome_da_Pizza,
+    c.category_name AS Categoria,
+    od.quantity AS Quantidade
 FROM order_details od
 INNER JOIN pizzas p ON od.pizza_id = p.pizza_id
 INNER JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
 INNER JOIN categories c ON pt.category_id = c.category_id;
 
 
--- 2.2. LEFT JOIN (Returns ALL from left table and matching from right table)
--- Ex: Ensure all pizza types appear, even if they had no sales (hypothetical)
+-- 2.2. LEFT JOIN (retorna todos os registros da tabela à esquerda e as correspondências da direita)
+-- Exemplo: exibir todos os tipos de pizza, mesmo sem vendas (hipoteticamente)
 SELECT 
-    pt.name AS Pizza,
-    SUM(od.quantity) AS Total_Sold
+    pt.name AS Sabor,
+    SUM(od.quantity) AS Unidades_Vendidas
 FROM pizza_types pt
 LEFT JOIN pizzas p ON pt.pizza_type_id = p.pizza_type_id
 LEFT JOIN order_details od ON p.pizza_id = od.pizza_id
 GROUP BY pt.name
-ORDER BY Total_Sold ASC;
+ORDER BY Unidades_Vendidas ASC;
 
 
--- 2.3. RIGHT JOIN (Returns ALL from right table and matching from left table)
--- Ex: List all categories and find their pizzas (inverse of previous)
+-- 2.3. RIGHT JOIN (retorna todos os registros da tabela à direita e as correspondências da esquerda)
+-- Exemplo: listar todas as categorias e encontrar suas pizzas (inverso da consulta anterior)
 SELECT 
-    pt.name AS Pizza,
-    c.category_name
+    pt.name AS Sabor,
+    c.category_name AS Categoria
 FROM pizza_types pt
 RIGHT JOIN categories c ON pt.category_id = c.category_id;
 
 
--- 2.4. FULL OUTER JOIN (Returns all records from both tables, joining on match)
--- Useful in audits to find "orphans" (e.g., a pizza with no type or a type with no pizza)
+-- 2.4. FULL OUTER JOIN (retorna todos os registros das duas tabelas, combinando os correspondentes)
+-- Útil para auditorias de registros órfãos (por exemplo, pizza sem tipo ou tipo sem pizza)
 SELECT 
-    p.pizza_id,
-    pt.name
+    p.pizza_id AS Id_Pizza,
+    pt.name AS Nome_da_Pizza
 FROM pizzas p
 FULL OUTER JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
-WHERE p.pizza_id IS NULL OR pt.pizza_type_id IS NULL; -- Filters only issues
+WHERE p.pizza_id IS NULL OR pt.pizza_type_id IS NULL; -- Exibe somente inconsistências
 
 
 ---------------------------------------------------------------
--- 3. SIMPLE REPORTS (GROUP BY AND AGGREGATE FUNCTIONS)
+-- 3. RELATÓRIOS BÁSICOS (GROUP BY E FUNÇÕES DE AGREGAÇÃO)
 ---------------------------------------------------------------
 
--- 3.1. Total orders, total pizzas sold, and average pizzas per daily order
+-- 3.1. Total de pedidos, total de pizzas vendidas e média de pizzas por pedido diário
 SELECT 
-    o.date AS Order_Date,
-    COUNT(DISTINCT o.order_id) AS Total_Orders,
-    SUM(od.quantity) AS Total_Pizzas_Sold,
+    o.date AS Data_do_Pedido,
+    COUNT(DISTINCT o.order_id) AS Total_de_Pedidos,
+    SUM(od.quantity) AS Total_de_Pizzas_Vendidas,
     CAST(SUM(od.quantity) AS DECIMAL(10,2))
-        / NULLIF(COUNT(DISTINCT o.order_id), 0) AS Avg_Pizzas_Per_Order
+        / NULLIF(COUNT(DISTINCT o.order_id), 0) AS Media_de_Pizzas_por_Pedido
 FROM orders o
 JOIN order_details od ON o.order_id = od.order_id
 GROUP BY o.date
-ORDER BY Total_Pizzas_Sold DESC;
+ORDER BY Total_de_Pizzas_Vendidas DESC;
 
 
 ---------------------------------------------------------------
--- 4. SUBQUERIES
+-- 4. SUBCONSULTAS
 ---------------------------------------------------------------
 
--- 4.1. Subquery in WHERE clause: 
--- What are the details of orders that included the MOST EXPENSIVE pizza on the menu?
+-- 4.1. Subconsulta na cláusula WHERE:
+-- Quais são os detalhes dos pedidos que incluíram a pizza mais cara do cardápio?
 SELECT 
-    order_id,
-    pizza_id,
-    quantity
+    order_id AS Id_Pedido,
+    pizza_id AS Id_Pizza,
+    quantity AS Quantidade
 FROM order_details
 WHERE pizza_id IN (
-    -- Subquery: Finds the ID of the pizza(s) with the highest price
+    -- Subconsulta: encontra o identificador da(s) pizza(s) com o maior preço
     SELECT pizza_id 
     FROM pizzas 
     WHERE price = (SELECT MAX(price) FROM pizzas)
 );
 
 
--- 4.2. Subquery in SELECT clause:
--- Calculate revenue for each pizza and show its % share of total overall revenue
+-- 4.2. Subconsulta na cláusula SELECT:
+-- Calcula a receita de cada pizza e sua participação percentual na receita total
 SELECT 
-    pt.name AS Pizza_Name,
-    SUM(od.quantity * p.price) AS Pizza_Revenue,
+    pt.name AS Nome_da_Pizza,
+    SUM(od.quantity * p.price) AS Receita_da_Pizza,
     (SUM(od.quantity * p.price) / 
         (SELECT SUM(quantity * price) FROM order_details od2 JOIN pizzas p2 ON od2.pizza_id = p2.pizza_id)
-    ) * 100 AS Percentage_Of_Total
+    ) * 100 AS Participacao_na_Receita_Total
 FROM order_details od
 JOIN pizzas p ON od.pizza_id = p.pizza_id
 JOIN pizza_types pt ON p.pizza_type_id = pt.pizza_type_id
 GROUP BY pt.name
-ORDER BY Pizza_Revenue DESC;
+ORDER BY Receita_da_Pizza DESC;
 
 
 ---------------------------------------------------------------
--- 5. SET OPERATIONS (UNION, INTERSECT, EXCEPT)
+-- 5. OPERAÇÕES DE CONJUNTOS (UNION, INTERSECT, EXCEPT)
 ---------------------------------------------------------------
 
--- 5.1. UNION (Combines results by stacking them, removing duplicates)
--- Ex: List of ingredient names containing "Cheese" OR "Garlic"
-SELECT ingredient_name FROM ingredients WHERE ingredient_name LIKE '%Cheese%'
+-- 5.1. UNION (combina os resultados e remove duplicatas)
+-- Exemplo: nomes de ingredientes que contêm "Cheese" ou "Garlic"
+SELECT ingredient_name AS Ingrediente FROM ingredients WHERE ingredient_name LIKE '%Cheese%'
 UNION
-SELECT ingredient_name FROM ingredients WHERE ingredient_name LIKE '%Garlic%';
+SELECT ingredient_name AS Ingrediente FROM ingredients WHERE ingredient_name LIKE '%Garlic%';
 
 
--- 5.2. INTERSECT (Returns only results present in BOTH queries)
--- Ex: Which ingredients are used in BOTH 'Veggie' AND 'Classic' categories?
-SELECT i.ingredient_name
+-- 5.2. INTERSECT (retorna somente resultados presentes nas duas consultas)
+-- Exemplo: ingredientes usados nas categorias 'Veggie' e 'Classic'
+SELECT i.ingredient_name AS Ingrediente
 FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
 JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
@@ -157,7 +157,7 @@ WHERE c.category_name = 'Veggie'
 
 INTERSECT
 
-SELECT i.ingredient_name
+SELECT i.ingredient_name AS Ingrediente
 FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
 JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
@@ -165,9 +165,9 @@ JOIN categories c ON pt.category_id = c.category_id
 WHERE c.category_name = 'Classic';
 
 
--- 5.3. EXCEPT (Returns results from the first query MINUS those in the second)
--- Ex: Which ingredients exist in 'Veggie' category that NEVER appear in 'Chicken'?
-SELECT i.ingredient_name
+-- 5.3. EXCEPT (retorna resultados da primeira consulta que não aparecem na segunda)
+-- Exemplo: ingredientes da categoria 'Veggie' que nunca aparecem em 'Chicken'
+SELECT i.ingredient_name AS Ingrediente
 FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
 JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
@@ -176,7 +176,7 @@ WHERE c.category_name = 'Veggie'
 
 EXCEPT
 
-SELECT i.ingredient_name
+SELECT i.ingredient_name AS Ingrediente
 FROM ingredients i
 JOIN pizza_type_ingredients pti ON i.ingredient_id = pti.ingredient_id
 JOIN pizza_types pt ON pti.pizza_type_id = pt.pizza_type_id
@@ -185,12 +185,12 @@ WHERE c.category_name = 'Chicken';
 
 
 ---------------------------------------------------------------
--- 6. ADVANCED ANALYTICS (CTEs, WINDOW FUNCTIONS, SELF JOIN, HAVING)
+-- 6. ANÁLISES AVANÇADAS (CTEs, FUNÇÕES DE JANELA, SELF JOIN E HAVING)
 ---------------------------------------------------------------
 
--- 6.1. Market Basket Analysis with CTE and Self Join
--- Top 10 pizza flavor pairs purchased together in the same order.
--- DISTINCT in the CTE prevents multiple sizes of a flavor from inflating pair counts.
+-- 6.1. Análise de produtos comprados em conjunto com CTE e junção da tabela consigo mesma
+-- Os 10 pares de sabores mais comprados juntos no mesmo pedido.
+-- DISTINCT na CTE evita contar mais de um tamanho do mesmo sabor como pares diferentes.
 WITH OrderPizzaTypes AS (
     SELECT DISTINCT
         od.order_id,
@@ -199,9 +199,9 @@ WITH OrderPizzaTypes AS (
     INNER JOIN pizzas p ON od.pizza_id = p.pizza_id
 )
 SELECT TOP 10
-    pt1.name AS Pizza_1,
-    pt2.name AS Pizza_2,
-    COUNT(DISTINCT first_type.order_id) AS Orders_Together
+    pt1.name AS Sabor_1,
+    pt2.name AS Sabor_2,
+    COUNT(DISTINCT first_type.order_id) AS Pedidos_em_Comum
 FROM OrderPizzaTypes first_type
 INNER JOIN OrderPizzaTypes second_type
     ON first_type.order_id = second_type.order_id
@@ -209,11 +209,11 @@ INNER JOIN OrderPizzaTypes second_type
 INNER JOIN pizza_types pt1 ON first_type.pizza_type_id = pt1.pizza_type_id
 INNER JOIN pizza_types pt2 ON second_type.pizza_type_id = pt2.pizza_type_id
 GROUP BY pt1.name, pt2.name
-ORDER BY Orders_Together DESC, pt1.name, pt2.name;
+ORDER BY Pedidos_em_Comum DESC, pt1.name, pt2.name;
 
 
--- 6.2. Top 2 menu pizzas by gross revenue within each category
--- DENSE_RANK keeps ties and restarts the ranking for every category.
+-- 6.2. Duas pizzas de maior receita bruta em cada categoria
+-- DENSE_RANK mantém empates e reinicia a classificação em cada categoria.
 WITH PizzaRevenue AS (
     SELECT
         c.category_name,
@@ -236,17 +236,17 @@ WITH PizzaRevenue AS (
     FROM PizzaRevenue
 )
 SELECT
-    category_name,
-    Pizza_Name,
-    Gross_Revenue,
-    Revenue_Rank
+    category_name AS Categoria,
+    Pizza_Name AS Nome_da_Pizza,
+    Gross_Revenue AS Receita_Bruta,
+    Revenue_Rank AS Posicao_na_Categoria
 FROM RankedPizzaRevenue
 WHERE Revenue_Rank <= 2
-ORDER BY category_name, Revenue_Rank, Pizza_Name;
+ORDER BY Categoria, Posicao_na_Categoria, Nome_da_Pizza;
 
 
--- 6.3. Recipe complexity in 1NF with GROUP BY and HAVING
--- Recipes with at least 7 distinct ingredients and their average menu price.
+-- 6.3. Complexidade das receitas na 1FN com GROUP BY e HAVING
+-- Receitas com pelo menos 7 ingredientes distintos e seu preço médio no cardápio.
 WITH RecipeComplexity AS (
     SELECT
         pt.pizza_type_id,
@@ -260,18 +260,18 @@ WITH RecipeComplexity AS (
     HAVING COUNT(DISTINCT pti.ingredient_id) >= 7
 )
 SELECT
-    rc.Pizza_Name,
-    rc.category_name,
-    rc.Ingredient_Count,
-    AVG(p.price) AS Average_Menu_Price
+    rc.Pizza_Name AS Nome_da_Pizza,
+    rc.category_name AS Categoria,
+    rc.Ingredient_Count AS Quantidade_de_Ingredientes,
+    AVG(p.price) AS Preco_Medio_no_Cardapio
 FROM RecipeComplexity rc
 INNER JOIN pizzas p ON rc.pizza_type_id = p.pizza_type_id
 GROUP BY rc.Pizza_Name, rc.category_name, rc.Ingredient_Count
-ORDER BY rc.Ingredient_Count DESC, rc.Pizza_Name;
+ORDER BY Quantidade_de_Ingredientes DESC, Nome_da_Pizza;
 
 
--- 6.4. Order segmentation with CTE and CASE WHEN
--- Average ticket is the average gross revenue per order in each profile.
+-- 6.4. Segmentação de pedidos com CTE e CASE WHEN
+-- O valor médio por pedido é a receita bruta média em cada perfil.
 WITH OrderTotals AS (
     SELECT
         o.order_id,
@@ -294,11 +294,11 @@ WITH OrderTotals AS (
     FROM OrderTotals
 )
 SELECT
-    Order_Profile,
-    COUNT(*) AS Total_Orders,
-    SUM(Total_Pizzas) AS Total_Pizzas_Sold,
-    AVG(Gross_Order_Revenue) AS Average_Ticket
+    Order_Profile AS Perfil_do_Pedido,
+    COUNT(*) AS Total_de_Pedidos,
+    SUM(Total_Pizzas) AS Total_de_Pizzas_Vendidas,
+    AVG(Gross_Order_Revenue) AS Valor_Medio_por_Pedido
 FROM SegmentedOrders
 GROUP BY Order_Profile
-ORDER BY Order_Profile;
+ORDER BY Perfil_do_Pedido;
 

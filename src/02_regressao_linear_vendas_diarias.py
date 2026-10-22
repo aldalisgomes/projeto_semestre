@@ -1,7 +1,7 @@
 """Previsão de demanda diária com regressão linear e histórico de vendas.
 
 Entrada de outras pizzarias: CSV com apenas date e quantity (uma linha por dia).
-As variáveis de calendário e histórico são calculadas pelo próprio script.
+As variáveis de calendário e histórico são calculadas pelo próprio programa.
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def evaluate_walk_forward(
             float(history.loc[date - pd.Timedelta(days=7)]) for date in block_dates
         )
 
-        # Após cada semana, o backtest considera que as vendas reais já foram observadas.
+        # Após cada semana, a avaliação considera que as vendas reais já foram observadas.
         actual_block = block.set_index("date")["quantity"].astype(float)
         history = pd.concat([history, actual_block])
 
@@ -209,14 +209,14 @@ def evaluate_walk_forward(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prevê vendas diárias para sete dias usando apenas date e quantity."
+        description="Prevê as vendas diárias dos próximos sete dias usando as colunas date e quantity."
     )
     parser.add_argument(
         "--daily-csv",
         type=Path,
-        help="CSV diário com as colunas date e quantity; sem isso usa os dados atuais do projeto.",
+        help="Arquivo CSV diário com as colunas date e quantity. Se omitido, usa os dados atuais do projeto.",
     )
-    parser.add_argument("--output", type=Path, help="Opcional: caminho para salvar as previsões em CSV.")
+    parser.add_argument("--output", type=Path, help="Opcional: caminho para salvar a tabela de previsão em CSV.")
     return parser.parse_args()
 
 
@@ -226,7 +226,7 @@ def main() -> None:
     if filled_days:
         if args.daily_csv is None:
             print(
-                f"Datas sem pedidos no conjunto original preenchidas como zero: {filled_days}."
+                f"Datas sem pedidos na base original preenchidas com zero: {filled_days}."
             )
 
     if len(daily) < MIN_HISTORY_DAYS:
@@ -263,21 +263,32 @@ def main() -> None:
     )
 
     print(f"Dias no histórico: {len(daily)} ({daily['date'].min().date()} a {daily['date'].max().date()})")
-    print(f"Treino walk-forward: {len(daily) - test_size} dias | avaliação: {test_size} dias")
+    print(f"Treinamento com validação progressiva: {len(daily) - test_size} dias | avaliação: {test_size} dias")
     print("\nVariáveis calculadas a partir de date e quantity:")
     print("  dia da semana, tendência (time_idx), lag_7d, rolling_7d,")
     print("  semana de pagamento (dias 1 a 10) e sazonalidade mensal (month_sin/month_cos).")
-    print("\nDesempenho no backtest cronológico:")
+    print("\nDesempenho na avaliação cronológica:")
     print(f"  MAE do modelo: {metrics['mae']:.2f} pizzas/dia")
     print(f"  RMSE: {metrics['rmse']:.2f} pizzas/dia")
     print(f"  R²: {metrics['r2']:.3f}")
     print(f"  MAE de referência (mesmo dia da semana anterior): {metrics['baseline_mae']:.2f} pizzas/dia")
     if metrics["mae"] > metrics["baseline_mae"]:
-        print("  Atenção: o modelo ficou pior que a referência lag_7d neste backtest.")
+        print("  Atenção: neste histórico, o modelo errou mais que a referência lag_7d.")
 
     print("\nPrevisão para os próximos sete dias:")
-    print("(faixa indicativa = previsão +/- MAE do backtest; não é intervalo de confiança)")
-    print(forecast_table.to_string(index=False))
+    print("(faixa indicativa = previsão +/- MAE da avaliação; não é intervalo de confiança)")
+    display_table = forecast_table.rename(
+        columns={
+            "date": "Data",
+            "day_of_week": "Dia da semana",
+            "lag_7d": "Venda na semana anterior",
+            "rolling_7d": "Média móvel de 7 dias",
+            "predicted_pizzas": "Previsão de pizzas",
+            "indicative_low": "Limite inferior indicativo",
+            "indicative_high": "Limite superior indicativo",
+        }
+    )
+    print(display_table.to_string(index=False))
 
     if args.output:
         output_path = args.output.expanduser().resolve()

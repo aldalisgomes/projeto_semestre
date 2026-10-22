@@ -1,4 +1,4 @@
-"""Dashboard Streamlit para análise de vendas de pizzarias.
+"""Painel Streamlit para análise de vendas de pizzarias.
 
 A fonte padrão são as sete tabelas normalizadas em data/normalized/. Também aceita
 um CSV simples, quatro CSVs de outra pizzaria ou consultas somente de leitura ao SQL Server.
@@ -56,7 +56,7 @@ SIMPLE_CSV_ALIASES = {
 
 
 st.set_page_config(
-    page_title="Pizza Analytics | UNIVESP",
+    page_title="Análises da Pizzaria | UNIVESP",
     page_icon="🍕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -853,7 +853,7 @@ def adapt_sqlite_query(query: str) -> str:
         query = query[:top_match.start()] + "SELECT " + query[top_match.end():]
 
     # RIGHT/FULL OUTER JOIN só existem em versões recentes do SQLite.
-    # Estas consultas fixas são reescritas como LEFT JOIN para compatibilidade com WSL antigo.
+    # Estas consultas fixas são reescritas como LEFT JOIN para compatibilidade com versões antigas do WSL.
     normalized_query = re.sub(r"\s+", " ", query).strip().rstrip(";")
     if re.search(
         r"\bRIGHT\s+JOIN\s+categories\s+c\s+ON\s+pt\.category_id\s*=\s*c\.category_id\b",
@@ -913,7 +913,7 @@ def _execute_sqlite_analysis_query_cached(
     query: str,
     signature: tuple[tuple[str, int, int], ...],
 ) -> pd.DataFrame:
-    # signature invalida o cache quando `make normalize` atualiza qualquer tabela.
+    # A assinatura invalida o cache quando make normalize atualiza qualquer tabela.
     with sqlite3.connect(":memory:") as connection:
         for table in NORMALIZED_TABLES:
             dataframe = read_csv_path(NORMALIZED_DATA_DIR / f"{table}.csv")
@@ -996,7 +996,7 @@ def format_compact_money(value: float, symbol: str) -> str:
 
 
 def main() -> None:
-    st.title("🍕 Pizza Analytics")
+    st.title("🍕 Análises da Pizzaria")
     st.caption("Projeto Integrador IV · UNIVESP | Automação de dados e apoio à gestão de pizzarias")
 
     with st.sidebar:
@@ -1223,7 +1223,7 @@ def main() -> None:
     )
     kpi2.metric("Pizzas vendidas", format_number(total_quantity))
     kpi3.metric("Pedidos", format_number(order_count) if order_count is not None else "—")
-    kpi4.metric("Ticket médio", format_money(average_ticket, currency_symbol) if average_ticket is not None else "—")
+    kpi4.metric("Valor médio por pedido", format_money(average_ticket, currency_symbol) if average_ticket is not None else "—")
     kpi5.metric("Pizzas por pedido", format_number(average_pizzas, 2) if average_pizzas is not None else "—")
 
     overview_tab, menu_tab, peak_tab, ingredient_tab, forecast_tab, model_tab, sql_tab = st.tabs(
@@ -1434,6 +1434,7 @@ def main() -> None:
                         names="size",
                         values="pizzas",
                         title="Participação dos tamanhos nas unidades vendidas",
+                        labels={"size": "Tamanho", "pizzas": "Pizzas vendidas"},
                         hole=0.45,
                     )
                     st.plotly_chart(size_fig, width="stretch")
@@ -1459,7 +1460,18 @@ def main() -> None:
                         lambda amount: format_money(float(amount), currency_symbol)
                     )
                 st.markdown("**Pizzas mais vendidas**")
-                st.dataframe(top_products, hide_index=True, width="stretch")
+                st.dataframe(
+                    top_products.rename(
+                        columns={
+                            "product": "Produto",
+                            "category": "Categoria",
+                            "pizzas": "Pizzas vendidas",
+                            "receita": "Receita bruta",
+                        }
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                )
 
     with peak_tab:
         st.subheader("Em quais horários se concentra o movimento?")
@@ -1496,7 +1508,11 @@ def main() -> None:
                 hourly_summary = timed_sales.groupby("hour", as_index=False).agg(pizzas=("quantity", "sum"))
                 busiest = hourly_summary.sort_values("pizzas", ascending=False).head(5)
                 st.markdown("**Cinco horas com maior volume**")
-                st.dataframe(busiest, hide_index=True, width="stretch")
+                st.dataframe(
+                    busiest.rename(columns={"hour": "Horário", "pizzas": "Pizzas vendidas"}),
+                    hide_index=True,
+                    width="stretch",
+                )
 
     with ingredient_tab:
         st.subheader("Ingredientes associados às vendas")
@@ -1542,7 +1558,11 @@ def main() -> None:
                 color_continuous_scale="Oranges",
             )
             st.plotly_chart(ingredient_fig, width="stretch")
-            st.dataframe(ingredient_summary, hide_index=True, width="stretch")
+            st.dataframe(
+                ingredient_summary.rename(columns={"ingredient": "Ingrediente"}),
+                hide_index=True,
+                width="stretch",
+            )
 
     with forecast_tab:
         st.subheader("Previsão de demanda para sete dias")
@@ -1607,7 +1627,7 @@ def main() -> None:
                 metric_a, metric_b, metric_c = st.columns(3)
                 metric_a.metric("MAE do modelo", f"{metrics['mae']:.1f} pizzas/dia")
                 metric_b.metric("MAE de referência (lag_7d)", f"{metrics['baseline_mae']:.1f} pizzas/dia")
-                metric_c.metric("R² no backtest", f"{metrics['r2']:.3f}")
+                metric_c.metric("R² na avaliação", f"{metrics['r2']:.3f}")
                 if metrics["mae"] > metrics["baseline_mae"]:
                     st.warning("Neste histórico, a regressão teve erro maior que repetir as vendas da semana anterior.")
                 st.dataframe(forecast_table, hide_index=True, width="stretch")
@@ -1617,7 +1637,7 @@ def main() -> None:
                 recent = forecast_daily[forecast_daily["date"] >= recent_start]
                 recent_backtest = backtest[backtest["date"] >= recent_start]
                 fig.add_trace(go.Scatter(x=recent["date"], y=recent["quantity"], mode="lines", name="Vendas reais", line={"color": "#176B87"}))
-                fig.add_trace(go.Scatter(x=recent_backtest["date"], y=recent_backtest["predicted"], mode="lines", name="Backtest", line={"color": "#E07A2D", "dash": "dash"}))
+                fig.add_trace(go.Scatter(x=recent_backtest["date"], y=recent_backtest["predicted"], mode="lines", name="Avaliação retrospectiva", line={"color": "#E07A2D", "dash": "dash"}))
                 fig.add_trace(go.Scatter(x=forecast_dates, y=predictions + mae, mode="lines", line={"width": 0}, showlegend=False, hoverinfo="skip"))
                 fig.add_trace(go.Scatter(x=forecast_dates, y=np.maximum(0, predictions - mae), mode="lines", line={"width": 0}, fill="tonexty", fillcolor="rgba(168,50,90,0.16)", name="Faixa indicativa ± MAE", hoverinfo="skip"))
                 fig.add_trace(go.Scatter(x=forecast_dates, y=predictions, mode="lines+markers", name="Previsão 7 dias", line={"color": "#A8325A", "width": 3}))

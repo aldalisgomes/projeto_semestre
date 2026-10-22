@@ -1,35 +1,45 @@
-# Manual do painel Streamlit — Pizza Analytics
+# Manual do painel Streamlit — Análises da Pizzaria
 
 ## O que o painel entrega
 
-O painel do Projeto Integrador IV reúne métricas úteis para a gestão de uma pizzaria: receita bruta estimada, quantidade de pizzas, pedidos, ticket médio, desempenho por categoria e tamanho, horários de maior movimento, indicadores de ingredientes associados às receitas vendidas e previsão de demanda para sete dias.
+O painel do Projeto Integrador IV reúne métricas úteis para a gestão de uma pizzaria: receita bruta estimada, quantidade de pizzas, pedidos, valor médio por pedido, desempenho por categoria e tamanho, horários de maior movimento, indicadores de ingredientes associados às receitas vendidas e previsão de demanda para sete dias.
 
 **O painel agora usa como fonte padrão as sete tabelas normalizadas pelo ETL:** `orders`, `order_details`, `pizzas`, `pizza_types`, `categories`, `ingredients` e `pizza_type_ingredients`. Elas são materializadas em `data/normalized/` e relacionadas pelas chaves e cardinalidades do modelo do grupo antes de formar os gráficos. O ETL, o esquema SQL e os CSVs originais foram preservados.
 
 ## Instalação e abertura
 
-O caminho recomendado é abrir WSL/Ubuntu na pasta raiz do projeto e usar o GNU Make:
+### Ambiente validado pelo grupo
 
-```bash
-make setup
-make dashboard
-```
+O grupo executou o fluxo completo em Windows usando WSL2 Ubuntu, Docker Desktop com a integração WSL habilitada, GNU Make, VS Code e navegador. O VS Code é opcional: os comandos e o painel também podem ser usados pelo terminal e pelo navegador.
 
-`make setup` cria o ambiente `.venv` e instala as dependências do `requirements.txt`. `make dashboard` atualiza primeiro os CSVs normalizados, inicia o painel em `http://localhost:8501` em modo headless e aguarda a porta responder. No WSL, abre o endereço no navegador padrão do Windows; em Linux com sessão gráfica, tenta `xdg-open`. Esse alvo configura `PIZZA_DATABASE_URL` para tentar o SQL Server local; se ele não estiver acessível, o painel continua usando `data/normalized/`.
+### Fluxo completo em Docker
 
-Também é possível executar as etapas manualmente. Na pasta raiz, instale as dependências e exporte as tabelas normalizadas:
+No ambiente validado pelo grupo, abra um terminal WSL Ubuntu com Docker Desktop ativo e integrado, depois clone e inicie o projeto:
 
-```bash
-python -m pip install -r requirements.txt
-python src/04_exportar_base_normalizada.py
-streamlit run src/03_streamlit_dashboard.py --server.headless true
-```
+    git clone https://github.com/aldalisgomes/projeto_semestre
+    cd projeto_semestre
+    make all
 
-Com a execução manual, abra `http://localhost:8501` no navegador. O modo headless evita que o Ubuntu do WSL tente abrir um navegador Linux. Por padrão, **o painel não analisa diretamente os CSVs desnormalizados**: lê as sete tabelas já tratadas em `data/normalized/`. A aba **ETL e modelo** mostra a quantidade de registros carregada de cada tabela e os relacionamentos usados nos indicadores. Para usar o banco operacional, escolha **Banco SQL Server normalizado**; essa fonte consulta diretamente as tabelas do banco por `SELECT`.
+O alvo inicia o SQL Server, executa o ETL, exporta as sete tabelas normalizadas e abre o Streamlit no navegador em http://localhost:8501. O primeiro uso pode demorar enquanto o Docker baixa as imagens e constrói a aplicação. O contêiner da aplicação já inclui Python, dependências do projeto e ODBC, então não é necessário instalar Python ou ODBC no WSL para esse fluxo.
+
+O grupo também validou a conexão e a consulta 6.4 no SQL Server pelo Streamlit. No teste, o ETL auditou os dados, carregou as sete tabelas e exportou os CSVs normalizados. Esses resultados descrevem o teste feito em WSL; o grupo não testou uma instalação Linux nativa.
+
+### Linux nativo
+
+O Makefile também foi preparado para Linux nativo x86-64: use Git, GNU Make, Bash, Docker Engine e o complemento Docker Compose v2. Docker Desktop e VS Code não são obrigatórios nesse cenário. A imagem de SQL Server usada pelo projeto é destinada a computadores x86-64; ARM com emulação não faz parte do caminho suportado pela Microsoft. Em Linux sem interface gráfica, abra http://localhost:8501 manualmente depois que o servidor iniciar.
+
+### Apenas abrir o painel localmente
+
+Para usar os CSVs normalizados sem executar o ETL no SQL Server, instale as dependências Python locais e inicie o painel:
+
+    make setup
+    make dashboard
+
+Esse caminho local exige Python. A conexão SQL Server local também exige o driver ODBC do sistema; se ele não estiver instalado, use a fonte Base normalizada do projeto ou rode o fluxo Docker acima.
 
 ## Comandos do Makefile
 
-Use estes comandos na raiz do repositório, em WSL/Ubuntu com Docker Desktop integrado:
+Use os comandos abaixo na raiz do repositório. Em WSL, o Docker Desktop precisa estar integrado à distribuição Ubuntu; em Linux nativo x86-64, use Docker Engine e Docker Compose v2. Para o fluxo completo validado pelo grupo, execute make all.
 
 | Comando | O que faz |
 | --- | --- |
@@ -38,23 +48,23 @@ Use estes comandos na raiz do repositório, em WSL/Ubuntu com Docker Desktop int
 | `make db-up` | Sobe o SQL Server e aguarda a mensagem de prontidão. |
 | `make run` | Constrói a imagem e executa o ETL existente no SQL Server. |
 | `make normalize` | Executa `src/04_exportar_base_normalizada.py` e atualiza as sete tabelas CSV. |
-| `make dashboard` | Atualiza as tabelas, inicia o Streamlit local em modo headless e abre o navegador quando a porta `8501` responde. |
-| `make dashboard-docker` | Inicia/aguarda o SQL Server, exporta os CSVs com o container da aplicação e executa o Streamlit headless no Docker; abre o navegador após a porta `8501` responder e não exige Python/ODBC no WSL. |
-| `make all` | Executa em sequência: banco, ETL, exportação normalizada no container e painel Docker. |
-| `make db-down` | Para e remove o container e a rede do SQL Server. |
-| `make clean` | Remove caches Python temporários. |
+| `make dashboard` | Atualiza as tabelas, inicia o Streamlit local sem interface gráfica e abre o navegador quando a porta `8501` responde. |
+| `make dashboard-docker` | Inicia/aguarda o SQL Server, exporta os CSVs com o contêiner da aplicação e executa o Streamlit sem interface gráfica no Docker; abre o navegador após a porta `8501` responder e não exige Python/ODBC no WSL. |
+| `make all` | Executa em sequência: banco, ETL, exportação normalizada no contêiner e painel Docker. |
+| `make db-down` | Para e remove o contêiner e a rede do SQL Server, preservando o volume nomeado com os dados. |
+| `make clean` | Remove arquivos temporários de cache do Python. |
 
-**Cuidado com `make run` e `make all`:** o ETL atual executa o DDL de referência, que recria o banco `PizzaSales`. Use-os em uma base de demonstração/teste e proteja antes qualquer dado que precise ser mantido. Para abrir o painel com os CSVs normalizados, `make dashboard` é suficiente e não executa o ETL do SQL Server.
+**Cuidado com `make run` e `make all`:** o ETL atual executa o DDL de referência, que recria o banco `PizzaSales`. Use-os em uma base de demonstração ou teste e proteja antes qualquer dado que precise ser mantido. Para abrir o painel com os CSVs normalizados, `make dashboard` é suficiente e não executa o ETL do SQL Server.
 
 ## Aba Consultas SQL
 
-A aba **Consultas SQL** lê automaticamente `03_analysis_queries.sql` da raiz e separa as consultas numeradas, de `1.1` até `6.4`. O `selectbox` permite escolher uma delas; a interface exibe o SQL com realce de sintaxe e a tabela retornada.
+A aba **Consultas SQL** lê automaticamente `03_analysis_queries.sql` da raiz e separa as consultas numeradas, de `1.1` até `6.4`. A lista suspensa permite escolher uma delas; a interface exibe o SQL com realce de sintaxe e a tabela retornada.
 
 - Com **Banco SQL Server normalizado** selecionado, a consulta é executada diretamente no banco `PizzaSales`.
 - Com uma `PIZZA_DATABASE_URL` acessível e as sete tabelas do projeto disponíveis, o painel também usa o SQL Server.
 - Sem SQL Server acessível, a interface carrega `categories`, `pizza_types`, `ingredients`, `pizza_type_ingredients`, `pizzas`, `orders` e `order_details` de `data/normalized/` em um SQLite temporário na memória. O `SELECT TOP N` do T-SQL é convertido para `LIMIT N` nessa execução local.
 
-O fallback local exige as sete tabelas exportadas. Execute `make normalize` caso estejam ausentes ou desatualizadas. A aba consulta a base do projeto e não aplica os filtros de período/categoria/tamanho da barra lateral nem os CSVs externos enviados.
+A alternativa local exige as sete tabelas exportadas. Execute `make normalize` caso estejam ausentes ou desatualizadas. A aba consulta a base do projeto e não aplica os filtros de período/categoria/tamanho da barra lateral nem os CSVs externos enviados.
 
 ## Usar dados de outra pizzaria com um CSV
 
@@ -65,7 +75,7 @@ Para uma pizzaria que ainda registra poucas informações, escolha **Enviar CSV 
 | data ou date | Dia da venda, preferencialmente no formato AAAA-MM-DD (por exemplo, 2026-10-20). |
 | quantidade ou quantity | Número de pizzas vendidas naquela linha; use zero para dia sem venda ou fechado. |
 
-O painel também reconhece pedido_id/order_id, hora/time, produto/product, tamanho/size, preco_unitario/unit_price, categoria/category e ingredientes/ingredients. São opcionais: cada coluna habilita apenas as análises que ela sustenta. Sem preço não há receita; sem identificador de pedido não há total de pedidos nem ticket médio; sem horário não há análise intradiária; sem produto, categoria ou tamanho não há detalhamento de cardápio. O arquivo é validado e usado em memória nesta sessão, sem alterar o banco ou os CSVs do projeto e sem aplicar regras inventadas de receita.
+O painel também reconhece pedido_id/order_id, hora/time, produto/product, tamanho/size, preco_unitario/unit_price, categoria/category e ingredientes/ingredients. São opcionais: cada coluna habilita apenas as análises que ela sustenta. Sem preço não há receita; sem identificador de pedido não há total de pedidos nem valor médio por pedido; sem horário não há análise intradiária; sem produto, categoria ou tamanho não há detalhamento de cardápio. O arquivo é validado e usado em memória nesta sessão, sem alterar o banco ou os CSVs do projeto e sem aplicar regras inventadas de receita.
 
 As linhas podem representar itens vendidos (um sabor por linha, com a quantidade daquela linha) ou totais diários. Registre corretamente a quantidade e não use um preço de linha inteira como se fosse preço unitário. O botão **Baixar modelo de CSV** no painel fornece um exemplo. Com apenas data e quantidade já é possível ver evolução diária.
 
@@ -110,7 +120,7 @@ Se selecionar essa fonte em WSL e aparecer erro de libodbc.so.2, a conexão loca
 ## Como ler os resultados
 
 - **Receita bruta** usa preço de venda multiplicado pela quantidade. O seletor de moeda altera apenas o símbolo; não converte valores. A base pública de exemplo tem preços em dólares.
-- **Ticket médio** é receita bruta dividida pelo número de pedidos distintos no período.
+- **Valor médio por pedido** é a receita bruta dividida pelo número de pedidos distintos no período.
 - **Picos de demanda** usa a data e a hora registradas no pedido. Ajuda a visualizar períodos movimentados, mas não mede tempo de preparo ou capacidade real da cozinha.
 - **Ingredientes** conta pizzas vendidas cujas receitas listam cada ingrediente. Um mesmo ingrediente pode aparecer em receitas de muitas pizzas; esse indicador não equivale a gramas, estoque ou custo consumido.
 - **Previsão** usa o modelo de regressão existente, requer pelo menos 56 dias no intervalo selecionado e compara o erro com repetir a venda do mesmo dia da semana anterior (`lag_7d`). A previsão começa no dia seguinte ao fim do intervalo.
