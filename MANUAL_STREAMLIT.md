@@ -56,9 +56,26 @@ A aba **Consultas SQL** lê automaticamente `03_analysis_queries.sql` da raiz e 
 
 O fallback local exige as sete tabelas exportadas. Execute `make normalize` caso estejam ausentes ou desatualizadas. A aba consulta a base do projeto e não aplica os filtros de período/categoria/tamanho da barra lateral nem os CSVs externos enviados.
 
-## Usar os dados de outra pizzaria
+## Usar dados de outra pizzaria com um CSV
 
-No menu lateral, escolha **Enviar CSVs da pizzaria** e forneça quatro arquivos exportados pelo sistema de vendas:
+Para uma pizzaria que ainda registra poucas informações, escolha **Enviar CSV único da pizzaria** no menu lateral. Basta exportar um arquivo CSV com duas colunas obrigatórias:
+
+| Coluna | O que registrar |
+| --- | --- |
+| data ou date | Dia da venda, preferencialmente no formato AAAA-MM-DD (por exemplo, 2026-10-20). |
+| quantidade ou quantity | Número de pizzas vendidas naquela linha; use zero para dia sem venda ou fechado. |
+
+O painel também reconhece pedido_id/order_id, hora/time, produto/product, tamanho/size, preco_unitario/unit_price, categoria/category e ingredientes/ingredients. São opcionais: cada coluna habilita apenas as análises que ela sustenta. Sem preço não há receita; sem identificador de pedido não há total de pedidos nem ticket médio; sem horário não há análise intradiária; sem produto, categoria ou tamanho não há detalhamento de cardápio. O arquivo é validado e usado em memória nesta sessão, sem alterar o banco ou os CSVs do projeto e sem aplicar regras inventadas de receita.
+
+As linhas podem representar itens vendidos (um sabor por linha, com a quantidade daquela linha) ou totais diários. Registre corretamente a quantidade e não use um preço de linha inteira como se fosse preço unitário. O botão **Baixar modelo de CSV** no painel fornece um exemplo. Com apenas data e quantidade já é possível ver evolução diária.
+
+Para habilitar a previsão, selecione um período com pelo menos 56 dias consecutivos registrados. Inclua uma linha para cada dia entre a primeira e a última data, usando quantidade zero nos dias sem venda ou em que a pizzaria ficou fechada. Se o CSV tiver lacunas, a previsão é suspensa para não confundir falta de registro com zero vendas. Um histórico menor ainda permite visualizar vendas, mas não sustenta a previsão com a validação atual.
+
+Receita, pedidos, cardápio, horários e ingredientes ficam indisponíveis ou incompletos quando os campos correspondentes não são fornecidos. O painel não estima valores ausentes. Mesmo com preço, a métrica é receita bruta, não lucro; para medir lucro, estoque ou consumo real de ingredientes seriam necessários custos e quantidades por receita.
+
+### Importação estruturada em quatro CSVs
+
+Para exportações que já separem pedidos, itens e cardápio, escolha **Enviar quatro CSVs da pizzaria** e forneça:
 
 | Arquivo | Campos obrigatórios |
 | --- | --- |
@@ -73,7 +90,7 @@ No envio de CSVs, a opção **Aplicar regras de receita do ETL deste projeto** v
 
 Essas transformações não alteram os CSVs enviados nem gravam dados no banco. As chaves precisam corresponder entre os arquivos. O painel valida chaves, quantidades, preços, datas e horários; sinaliza linhas órfãs e exclui dos gráficos aquelas que não podem ser relacionadas. Datas fora de 2015 e tamanhos fora do padrão do esquema de referência são contabilizados, mas não bloqueiam a análise, para permitir históricos atuais e cardápios de outras pizzarias. Abra **Qualidade dos dados e interpretação** no painel para ver a contagem de categorias, tipos, ingredientes, relações tipo-ingrediente e as regras aplicadas. `order_details_id` é verificado quando o CSV o fornece.
 
-A previsão de demanda do painel agrega as quantidades dos itens de venda relacionados às tabelas de pedidos e cardápio já validadas. Ingredientes não são variáveis de entrada dessa previsão: o alvo é a quantidade diária de pizzas. O algoritmo independente em `src/02_regressao_linear_vendas_diarias.py` continua podendo receber somente `date,quantity`, como descrito em `MANUAL_REGRESSAO_LINEAR.md`.
+A previsão de demanda agrega a quantidade diária de pizzas. Na importação simples, ela exige pelo menos 56 dias consecutivos registrados e não roda se houver datas ausentes; inclua todos os dias e use quantidade zero para dias sem venda ou fechamento. Ingredientes não são variáveis de entrada: o alvo é quantidade, e não receita, lucro ou consumo físico. O algoritmo independente em src/02_regressao_linear_vendas_diarias.py também aceita somente date,quantity, como descrito em MANUAL_REGRESSAO_LINEAR.md.
 
 ## Conectar ao SQL Server
 
@@ -87,6 +104,8 @@ streamlit run src/03_streamlit_dashboard.py
 ```
 
 Se a senha tiver caracteres reservados em uma URL, codifique-os para URL. O driver ODBC do SQL Server precisa estar instalado na máquina. Não coloque senhas no código nem em arquivos versionados.
+
+Se selecionar essa fonte em WSL e aparecer erro de libodbc.so.2, a conexão local não encontrou unixODBC. Quando data/normalized/ está disponível, o painel avisa e continua com os CSVs normalizados do projeto; isso não significa que o SQL Server conectou. Para usar SQL Server sem instalar ODBC no WSL, rode make all e abra o painel Docker, com Docker Desktop integrado ao WSL e o banco de demonstração preparado pelo ETL.
 
 ## Como ler os resultados
 

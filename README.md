@@ -162,6 +162,7 @@ make all                  # banco + ETL + CSVs normalizados + painel Docker
 
 Na nova aba **Consultas SQL**, o painel lê os blocos numerados do `03_analysis_queries.sql`, exibe o código selecionado e mostra a tabela de resultado. Com as tabelas do projeto disponíveis, executa no SQL Server; sem SQL Server, carrega as sete tabelas de `data/normalized/` em SQLite em memória. As consultas não usam os filtros de data da barra lateral.
 
+Para uma pizzaria com poucos dados estruturados, o painel também oferece **Enviar CSV único da pizzaria**: data e quantidade são suficientes para o histórico diário; pedido, horário, produto, preço, categoria e ingredientes são opcionais e habilitam somente as análises correspondentes. A previsão exige ao menos 56 dias consecutivos e não é calculada se houver datas sem linha. Use zero para dias sem venda ou fechamento. Se a conexão SQL Server local falhar por falta de unixODBC/ODBC no WSL, o painel avisa e usa os CSVs normalizados locais, quando disponíveis; para usar SQL Server sem instalar o driver no WSL, use o painel Docker após preparar o banco de demonstração com o ETL.
 Consulte [MANUAL_STREAMLIT.md](MANUAL_STREAMLIT.md) para detalhes sobre as fontes de dados, as consultas e os limites das métricas.
 
 ## Analytics Highlights
