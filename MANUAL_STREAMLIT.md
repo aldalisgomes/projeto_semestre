@@ -4,7 +4,7 @@
 
 O painel do Projeto Integrador IV reúne métricas úteis para a gestão de uma pizzaria: receita bruta estimada, quantidade de pizzas, pedidos, valor médio por pedido, desempenho por categoria e tamanho, horários de maior movimento, indicadores de ingredientes associados às receitas vendidas e previsão de demanda para sete dias.
 
-**O painel agora usa como fonte padrão as sete tabelas normalizadas pelo ETL:** `orders`, `order_details`, `pizzas`, `pizza_types`, `categories`, `ingredients` e `pizza_type_ingredients`. Elas são materializadas em `data/normalized/` e relacionadas pelas chaves e cardinalidades do modelo do grupo antes de formar os gráficos. O ETL, o esquema SQL e os CSVs originais foram preservados.
+**O painel usa como fonte padrão as sete tabelas normalizadas pelo ETL:** `orders`, `order_details`, `pizzas`, `pizza_types`, `categories`, `ingredients` e `pizza_type_ingredients`. Elas são materializadas em `data/normalized/` e relacionadas pelas chaves e cardinalidades do modelo do grupo antes de formar os gráficos.
 
 ## Instalação e abertura
 
@@ -129,7 +129,7 @@ Se selecionar essa fonte em WSL e aparecer erro de libodbc.so.2, a conexão loca
 
 A normalização reorganiza os dados em sete tabelas relacionadas e reduz repetição e inconsistências de cadastro. Ela não deveria alterar a quantidade de pizzas vendidas nem a receita quando as chaves e os valores estão corretos. Por isso, indicadores agregados como vendas por dia, receita ou pizzas por categoria podem manter os mesmos resultados: o painel reconstrói essas métricas por meio dos relacionamentos entre as tabelas normalizadas. A diferença principal está na estrutura, na integridade e na possibilidade de analisar categorias e ingredientes com relacionamentos consistentes; não em mudar artificialmente os números da operação. A aba **ETL e modelo** evidencia as tabelas, seus volumes e os relacionamentos usados.
 
-## Limites para apresentar o projeto
+## Limites do projeto
 
 A base do projeto é uma amostra histórica de 2015. Ela serve para demonstrar o pipeline e o painel, não para orientar compras atuais. Cada pizzaria precisa carregar seus próprios dados recentes.
 
