@@ -1,12 +1,12 @@
 # Manual da previsão de demanda para uma pizzaria de bairro
 
-> **Recomendação principal: preserve o trabalho já feito no projeto.** O modelo usa as tabelas `orders` e `order_details` exportadas após a limpeza e normalização; não substitui nem altera o ETL, o esquema relacional ou os dados brutos. Para outra pizzaria, o único arquivo de entrada continua sendo um CSV com duas colunas: `date` e `quantity`.
+> **Recomendação principal: Para outra pizzaria, o único arquivo de entrada é um CSV com duas colunas: `date` e `quantity`.
 
 ## O que o modelo prevê
 
 O programa `src/02_regressao_linear_vendas_diarias.py` estima a quantidade total de pizzas vendidas em cada um dos próximos sete dias. Ele usa regressão linear supervisionada: aprende com vendas históricas e mede seu erro em datas que ficaram fora do ajuste. Além da data e da quantidade, calcula variáveis úteis a partir dos próprios dados; não é necessário acrescentar colunas ao CSV.
 
-Esse primeiro modelo pode ajudar a planejar massa, compras de ingredientes, equipe e capacidade de produção. Ele prevê o total de pizzas, não o mix por sabor, tamanho ou canal.
+Esse primeiro modelo pode ajudar a planejar massa, compras de ingredientes, equipe e capacidade de produção. Ele prevê o total de pizzas.
 
 ## Dados de entrada: somente duas colunas
 
