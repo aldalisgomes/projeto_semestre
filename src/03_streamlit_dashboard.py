@@ -7,6 +7,8 @@ um CSV simples, quatro CSVs de outra pizzaria ou consultas somente de leitura ao
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import io
 import os
 import re
 import sqlite3
@@ -19,12 +21,43 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import create_engine, text
+try:
+    # `streamlit run src/03_streamlit_dashboard.py` places `src/` on sys.path.
+    from pizzeria_import import (
+        CANONICAL_COLUMNS as IMPORT_COLUMNS,
+        DAY_NAMES as IMPORT_DAY_NAMES,
+        parse_sales_csv,
+        parse_sales_dates,
+        schedule_from_rows,
+        suggest_column_mapping,
+        validate_sales_csv,
+    )
+except ModuleNotFoundError as import_error:
+    # AppTest and package-based entry points may expose the project root instead.
+    if import_error.name != "pizzeria_import":
+        raise
+    from src.pizzeria_import import (
+        CANONICAL_COLUMNS as IMPORT_COLUMNS,
+        DAY_NAMES as IMPORT_DAY_NAMES,
+        parse_sales_csv,
+        parse_sales_dates,
+        schedule_from_rows,
+        suggest_column_mapping,
+        validate_sales_csv,
+    )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = PROJECT_ROOT / "src" / "02_regressao_linear_vendas_diarias.py"
 NORMALIZED_DATA_DIR = PROJECT_ROOT / "data" / "normalized"
 ANALYSIS_QUERIES_PATH = PROJECT_ROOT / "03_analysis_queries.sql"
+CASE_STUDY_CSV_PATH = PROJECT_ROOT / "output" / "VENDAS_PIZZARIA_BAIRRO.csv"
+CSV_TEMPLATE_PATH = PROJECT_ROOT / "docs" / "modelo_csv_vendas_pizzaria.csv"
+MODE_PUBLIC = "Base pública original do projeto"
+MODE_CASE_STUDY = "Estudo de caso — VENDAS_PIZZARIA_BAIRRO"
+MODE_CUSTOM_CSV = "Carregar CSV de outra pizzaria"
+MODE_FOUR_CSVS = "Enviar quatro CSVs da pizzaria"
+MODE_SQL_SERVER = "Banco SQL Server normalizado"
 NORMALIZED_TABLES = (
     "categories",
     "pizza_types",
@@ -56,7 +89,7 @@ SIMPLE_CSV_ALIASES = {
 
 
 st.set_page_config(
-    page_title="Análises da Pizzaria | UNIVESP",
+    page_title="Painel de Análise de Dados para Pizzarias | UNIVESP",
     page_icon="🍕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -84,13 +117,13 @@ def read_uploaded_csv(uploaded_file, *, latin1_fallback: bool = False) -> pd.Dat
 
 
 def read_single_sales_csv(uploaded_file) -> pd.DataFrame:
-    """Lê CSV de vendas separado por vírgula ou ponto e vírgula."""
+    """Lê CSV como texto para preservar IDs, inclusive zeros à esquerda."""
     uploaded_file.seek(0)
     try:
-        return pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
+        return pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig", dtype=str, keep_default_na=False)
     except UnicodeDecodeError:
         uploaded_file.seek(0)
-        return pd.read_csv(uploaded_file, sep=None, engine="python", encoding="latin1")
+        return pd.read_csv(uploaded_file, sep=None, engine="python", encoding="latin1", dtype=str, keep_default_na=False)
 
 
 def normalize_column_name(value: str) -> str:
@@ -116,6 +149,109 @@ def parse_localized_numbers(values: pd.Series) -> pd.Series:
         return pd.to_numeric(cleaned, errors="coerce")
 
     return values.map(parse_one).astype(float)
+
+
+def build_daily_sales_series(
+    frame: pd.DataFrame,
+    start_date,
+    end_date,
+    *,
+    closed_weekdays: tuple[int, ...] = (),
+) -> pd.DataFrame:
+    """Agrega itens transacionais em uma série diária completa, sem criar pedidos."""
+    calendar = pd.date_range(
+        pd.Timestamp(start_date).normalize(),
+        pd.Timestamp(end_date).normalize(),
+        freq="D",
+    )
+    transactions = frame.dropna(subset=["date", "quantity"]).copy()
+    transactions = transactions.loc[transactions["quantity"].gt(0)]
+    daily = (
+        transactions.groupby("date")["quantity"].sum()
+        .reindex(calendar, fill_value=0)
+        .astype(float)
+    )
+    if closed_weekdays:
+        daily.loc[daily.index.day_of_week.isin(closed_weekdays)] = 0.0
+    result = daily.rename_axis("date").reset_index(name="quantity")
+    return result
+
+
+def predict_pizzeria_recursively(
+    model_module,
+    model,
+    history: pd.Series,
+    dates: pd.DatetimeIndex,
+    origin_date: pd.Timestamp,
+    *,
+    closed_weekdays: tuple[int, ...],
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Aplica os fechamentos da pizzaria ao redor do preditor original."""
+    working_history = history.astype(float).copy()
+    predictions: list[float] = []
+    feature_rows: list[pd.DataFrame] = []
+    for date in pd.DatetimeIndex(dates):
+        prediction, features = model_module.predict_recursively(
+            model,
+            working_history,
+            pd.DatetimeIndex([date]),
+            origin_date,
+        )
+        value = 0.0 if date.day_of_week in closed_weekdays else max(float(prediction[0]), 0.0)
+        predictions.append(value)
+        feature_rows.append(features)
+        working_history.loc[date] = value
+    return np.asarray(predictions), pd.concat(feature_rows)
+
+
+def evaluate_pizzeria_walk_forward(
+    model_module,
+    daily: pd.DataFrame,
+    test_size: int,
+    *,
+    closed_weekdays: tuple[int, ...],
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Avalia a previsão da pizzaria respeitando os dias fechados informados."""
+    origin_date = pd.Timestamp(daily["date"].iloc[0])
+    split_at = len(daily) - test_size
+    history = daily.iloc[:split_at].set_index("date")["quantity"].astype(float)
+    test = daily.iloc[split_at:].reset_index(drop=True)
+    predictions: list[float] = []
+    baselines: list[float] = []
+
+    for start in range(0, len(test), 7):
+        block = test.iloc[start : start + 7]
+        x_train, y_train = model_module.make_training_data(history, origin_date)
+        model = model_module.LinearRegression().fit(x_train, y_train)
+        block_dates = pd.DatetimeIndex(block["date"])
+        block_predictions, _ = predict_pizzeria_recursively(
+            model_module,
+            model,
+            history,
+            block_dates,
+            origin_date,
+            closed_weekdays=closed_weekdays,
+        )
+        predictions.extend(block_predictions.tolist())
+        baselines.extend(
+            float(history.loc[date - pd.Timedelta(days=7)]) for date in block_dates
+        )
+        actual_block = block.set_index("date")["quantity"].astype(float)
+        history = pd.concat([history, actual_block])
+
+    actual = test["quantity"].to_numpy(dtype=float)
+    predictions_array = np.asarray(predictions)
+    baseline_array = np.asarray(baselines)
+    metrics = {
+        "mae": float(model_module.mean_absolute_error(actual, predictions_array)),
+        "rmse": float(np.sqrt(model_module.mean_squared_error(actual, predictions_array))),
+        "r2": float(model_module.r2_score(actual, predictions_array)),
+        "baseline_mae": float(model_module.mean_absolute_error(actual, baseline_array)),
+    }
+    backtest = pd.DataFrame(
+        {"date": test["date"], "actual": actual, "predicted": predictions_array}
+    )
+    return metrics, backtest
 
 
 def prepare_simple_sales(uploaded_file) -> tuple[pd.DataFrame, dict[str, int]]:
@@ -149,9 +285,10 @@ def prepare_simple_sales(uploaded_file) -> tuple[pd.DataFrame, dict[str, int]]:
             "Use cabeçalhos como 'data' e 'quantidade' ou 'date' e 'quantity'."
         )
 
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce", dayfirst=True).dt.normalize()
+    parsed_dates, date_errors = parse_sales_dates(frame["date"].tolist())
+    frame["date"] = pd.Series(parsed_dates, index=frame.index, dtype="datetime64[ns]").dt.normalize()
     if frame["date"].isna().any():
-        bad_rows = (frame.index[frame["date"].isna()] + 2).tolist()[:5]
+        bad_rows = [int(index) + 2 for index, error in enumerate(date_errors) if error is not None][:5]
         raise ValueError(f"Há datas inválidas no CSV (linha(s): {bad_rows}).")
     calendar_days = pd.date_range(frame["date"].min(), frame["date"].max(), freq="D")
     days_without_rows = len(calendar_days.difference(pd.DatetimeIndex(frame["date"].drop_duplicates())))
@@ -208,7 +345,7 @@ def prepare_simple_sales(uploaded_file) -> tuple[pd.DataFrame, dict[str, int]]:
         not missing_price_on_sales.any()
         and (frame["price"].notna() & frame["quantity"].gt(0)).any()
     )
-    complete_orders = bool(frame["order_id"].notna().all() and frame["order_id"].notna().any())
+    valid_order_items = frame["order_id"].notna() & frame["quantity"].gt(0)
     quality = {
         "linhas do CSV recebido": int(len(frame)),
         "dias sem linha entre a primeira e a última data": int(days_without_rows),
@@ -220,7 +357,10 @@ def prepare_simple_sales(uploaded_file) -> tuple[pd.DataFrame, dict[str, int]]:
         "linhas sem categoria": int(frame["category"].isna().sum()),
         "linhas sem tamanho": int(frame["size"].isna().sum()),
         "coluna de preço completa": int(complete_prices),
-        "identificador de pedido completo": int(complete_orders),
+        "linhas com pedido_id preenchido": int(frame["order_id"].notna().sum()),
+        "linhas comerciais válidas": int(valid_order_items.sum()),
+        "pedidos distintos válidos": int(frame.loc[valid_order_items, "order_id"].nunique()),
+        "linhas com quantidade zero": int(frame["quantity"].eq(0).sum()),
         "horários válidos disponíveis": valid_times,
         "produtos informados": int(frame["product"].nunique(dropna=True)),
         "categorias informadas": int(frame["category"].nunique(dropna=True)),
@@ -995,52 +1135,397 @@ def format_compact_money(value: float, symbol: str) -> str:
     return f"{symbol} {amount}" if symbol else amount
 
 
+def render_csv_preparation_guide(widget_key: str) -> None:
+    """Plain-language CSV guide shown before a user imports an external file."""
+    with st.expander("Antes de enviar seu CSV", expanded=True):
+        st.warning(
+            "Um mesmo pedido pode aparecer em várias linhas quando contém diferentes produtos. "
+            "Isso é permitido e não representa duplicidade. O sistema sinaliza registros aparentemente "
+            "duplicados para conferência, mas não exclui vendas automaticamente."
+        )
+        st.markdown(
+            "Cada linha representa um item vendido. Informe a quantidade de unidades daquele item e repita "
+            "o `pedido_id` nas linhas que pertencem ao mesmo pedido. Os valores de exemplo abaixo são genéricos; "
+            "use o cardápio e os códigos do seu estabelecimento."
+        )
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Coluna": "data", "Regra": "AAAA-MM-DD; datas brasileiras somente quando reconhecíveis sem ambiguidade.", "Obrigatoriedade": "Obrigatória"},
+                    {"Coluna": "quantidade", "Regra": "Número inteiro positivo de unidades por linha.", "Obrigatoriedade": "Obrigatória"},
+                    {"Coluna": "pedido_id", "Regra": "Identificador como texto; pode se repetir entre itens do pedido.", "Obrigatoriedade": "Necessária para KPIs por pedido"},
+                    {"Coluna": "hora", "Regra": "HH ou HH:MM, como 18 ou 18:30.", "Obrigatoriedade": "Recomendada"},
+                    {"Coluna": "produto", "Regra": "Nome sem incorporar o tamanho.", "Obrigatoriedade": "Recomendada para produtos"},
+                    {"Coluna": "tamanho", "Regra": "Tamanho próprio do estabelecimento; não há lista fixa.", "Obrigatoriedade": "Recomendada"},
+                    {"Coluna": "preco_unitario", "Regra": "Preço cobrado por unidade, sem símbolo de moeda; 35.90 ou 35,90.", "Obrigatoriedade": "Necessária para faturamento"},
+                    {"Coluna": "categoria", "Regra": "Categoria usada pela pizzaria.", "Obrigatoriedade": "Recomendada"},
+                    {"Coluna": "ingredientes", "Regra": "Lista separada por vírgula ou ponto e vírgula.", "Obrigatoriedade": "Opcional"},
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.markdown("**Exemplos de linhas**")
+        st.code(
+            "data,quantidade,pedido_id,hora,produto,tamanho,preco_unitario,categoria,ingredientes\n"
+            "2026-01-15,2,1001,18:30,Calabresa,M,35.90,Tradicional,\"Molho; queijo; calabresa\"\n"
+            "2026-01-15,1,1001,18:30,Margherita,M,32.00,Vegetariana,\"Molho; queijo; tomate\"\n"
+            "2026-01-15,1,1002,19:15,Nutella,G,65.00,Doce,\"Creme de avelã\"",
+            language="csv",
+        )
+        st.caption(
+            "As duas primeiras linhas formam um pedido com produtos diferentes. O mesmo produto em pedidos "
+            "diferentes também é normal. Linhas idênticas são apenas possíveis duplicidades e precisam de conferência."
+        )
+        st.markdown("**Mesmo produto em pedidos diferentes — registros válidos**")
+        st.code(
+            "2026-01-15,2,1001,18:30,Calabresa,M,35.90,Tradicional,\"Molho; queijo; calabresa\"\n"
+            "2026-01-15,2,1002,19:10,Calabresa,M,35.90,Tradicional,\"Molho; queijo; calabresa\"",
+            language="csv",
+        )
+        st.markdown("**Possível duplicidade — sinalizada, não excluída**")
+        st.code(
+            "2026-01-15,2,1001,18:30,Calabresa,M,35.90,Tradicional,\"Molho; queijo; calabresa\"\n"
+            "2026-01-15,2,1001,18:30,Calabresa,M,35.90,Tradicional,\"Molho; queijo; calabresa\"",
+            language="csv",
+        )
+        st.caption(
+            "O painel não sabe se uma repetição exata é erro de exportação ou duas operações legítimas. "
+            "A conferência e qualquer correção ficam a cargo do responsável pela pizzaria."
+        )
+        st.download_button(
+            "Baixar modelo de CSV",
+            data=CSV_TEMPLATE_PATH.read_bytes(),
+            file_name="modelo_csv_vendas_pizzaria.csv",
+            mime="text/csv",
+            key=f"download_template_guide_{widget_key}",
+        )
+        st.markdown(
+            "Dias fechados recebem zero somente na série temporal. Um dia aberto sem registro fica como "
+            "desconhecido até você confirmar que não houve vendas. Essa confirmação não cria uma linha de pedido."
+        )
+
+
+def render_external_csv_wizard(uploaded_file):
+    """Validate a user CSV, keep its bytes intact, and return only an acknowledged analysis view."""
+    file_bytes = uploaded_file.getvalue()
+    file_name = getattr(uploaded_file, "name", "vendas.csv")
+    file_key = hashlib.sha256(file_bytes).hexdigest()[:12]
+    display_default = Path(file_name).stem
+
+    st.subheader("Validação e diagnóstico dos dados")
+    parsed = parse_sales_csv(file_bytes)
+    suggestions, candidates = suggest_column_mapping(parsed.headers)
+    mapping: dict[str, str | None] = {}
+
+    if parsed.headers:
+        st.markdown(
+            "O painel encontrou as colunas abaixo. Revise cada associação; nomes equivalentes são sugestões, "
+            "e não são aplicados antes da sua confirmação."
+        )
+        mapping_preview = pd.DataFrame(
+            [
+                {
+                    "Campo do painel": column,
+                    "Sugestão": suggestions.get(column) or "—",
+                    "Colunas candidatas": ", ".join(candidates.get(column, [])) or "—",
+                    "Uso": "Obrigatório" if column in ("data", "quantidade") else "Opcional ou habilita uma análise",
+                }
+                for column in IMPORT_COLUMNS
+            ]
+        )
+        st.dataframe(mapping_preview, hide_index=True, width="stretch")
+        with st.expander("Revisar ou alterar o mapeamento", expanded=True):
+            options = ["— não mapear —", *parsed.headers]
+            left, right = st.columns(2)
+            for position, column in enumerate(IMPORT_COLUMNS):
+                selected_suggestion = suggestions.get(column)
+                default_index = options.index(selected_suggestion) if selected_suggestion in options else 0
+                target_column = left if position % 2 == 0 else right
+                with target_column:
+                    selected = st.selectbox(
+                        f"Coluna do CSV para {column}",
+                        options,
+                        index=default_index,
+                        key=f"csv_map_{file_key}_{column}",
+                    )
+                mapping[column] = None if selected == options[0] else selected
+            mapping_confirmed = st.checkbox(
+                "Revisei e confirmo o mapeamento mostrado acima",
+                key=f"csv_mapping_confirm_{file_key}",
+            )
+    else:
+        mapping_confirmed = False
+        mapping = {column: None for column in IMPORT_COLUMNS}
+        st.error("O arquivo está vazio ou não tem um cabeçalho que possa ser lido.")
+
+    establishment_name = st.text_input(
+        "Nome ou identificação do estabelecimento (opcional)",
+        value=display_default,
+        key=f"csv_establishment_{file_key}",
+    ).strip() or display_default
+    order_identity_label = st.radio(
+        "Como o caixa identifica um pedido?",
+        ["pedido_id é único globalmente", "o número do pedido reinicia a cada data"],
+        help=(
+            "A primeira opção conta cada pedido_id uma vez no arquivo. A segunda conta a combinação data + pedido_id, "
+            "útil quando o caixa reutiliza números em dias diferentes. O identificador original continua preservado."
+        ),
+        key=f"csv_order_identity_{file_key}",
+    )
+    order_identity = "date_order" if order_identity_label.startswith("o número") else "global"
+
+    with st.expander("Configuração do estabelecimento: dias e horários", expanded=True):
+        st.caption(
+            "Os horários abaixo são valores iniciais editáveis, não regras aplicadas ao seu negócio. "
+            "Revise cada dia e confirme a configuração."
+        )
+        schedule_defaults = pd.DataFrame(
+            {
+                "Dia": DAY_NAMES,
+                "Abre?": [True] * 7,
+                "Abertura": ["18:00"] * 7,
+                "Fechamento": ["23:00"] * 7,
+            }
+        )
+        schedule_editor = st.data_editor(
+            schedule_defaults,
+            hide_index=True,
+            width="stretch",
+            key=f"csv_schedule_{file_key}",
+            column_config={
+                "Dia": st.column_config.TextColumn(disabled=True),
+                "Abre?": st.column_config.CheckboxColumn(help="Desmarque se a pizzaria fica fechada neste dia."),
+                "Abertura": st.column_config.TextColumn(help="Formato HH:MM, como 18:00."),
+                "Fechamento": st.column_config.TextColumn(help="Formato HH:MM, como 23:00."),
+            },
+        )
+        calendar_confirmed = st.checkbox(
+            "Revisei e confirmo os dias e horários de funcionamento",
+            key=f"csv_calendar_confirm_{file_key}",
+        )
+
+    schedule = schedule_from_rows(schedule_editor.to_dict("records"))
+    provisional = validate_sales_csv(
+        parsed,
+        mapping,
+        order_identity=order_identity,
+        schedule=schedule,
+        schedule_confirmed=calendar_confirmed,
+        confirm_open_no_sales=False,
+    )
+    open_gaps = (
+        not provisional.issues.empty
+        and provisional.issues["Mensagem"].astype(str).str.contains("Dia configurado como aberto sem registro", regex=False).any()
+    )
+    confirm_open_zero = False
+    if open_gaps:
+        confirm_open_zero = st.checkbox(
+            "Confirmo que os dias abertos sem registro no período selecionado tiveram zero vendas",
+            help="Essa confirmação completa somente a série temporal; não adiciona pedidos ao CSV.",
+            key=f"csv_open_zero_confirm_{file_key}",
+        )
+
+    result = validate_sales_csv(
+        parsed,
+        mapping,
+        order_identity=order_identity,
+        schedule=schedule,
+        schedule_confirmed=calendar_confirmed,
+        confirm_open_no_sales=confirm_open_zero,
+    )
+    st.markdown(f"**Resultado:** {result.status}")
+    summary = result.summary
+    date_start = summary["date_start"].strftime("%d/%m/%Y") if summary["date_start"] is not None else "—"
+    date_end = summary["date_end"].strftime("%d/%m/%Y") if summary["date_end"] is not None else "—"
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("Linhas recebidas", summary["total_rows"])
+    summary_columns[1].metric("Linhas aptas para análise", summary["valid_analysis_rows"])
+    summary_columns[2].metric("Pedidos identificados", summary["distinct_orders"])
+    summary_columns[3].metric("Possíveis grupos duplicados", summary["duplicate_groups"])
+    st.caption(
+        f"Período identificado: {date_start} a {date_end} · unidades nas linhas válidas: {summary['units']} · "
+        f"produtos: {summary['products']} · categorias: {summary['categories']} · tamanhos: "
+        f"{', '.join(summary['sizes']) if summary['sizes'] else 'não informados'} · dias abertos sem confirmação: {summary['unknown_days']}."
+    )
+
+    if not result.issues.empty:
+        for level, heading in (("Erro", "Erros"), ("Aviso", "Avisos"), ("Informação", "Informações")):
+            selected_issues = result.issues.loc[result.issues["Tipo"].eq(level)]
+            if not selected_issues.empty:
+                with st.expander(f"{heading} ({len(selected_issues)})", expanded=(level == "Erro")):
+                    st.dataframe(selected_issues, hide_index=True, width="stretch")
+    else:
+        st.success("Não foram encontradas inconsistências nos campos analisados.")
+
+    if summary["duplicate_affected_rows"]:
+        st.warning(
+            f"Foram identificados {summary['duplicate_groups']} grupo(s) com possíveis duplicidades, "
+            f"abrangendo {summary['duplicate_affected_rows']} linha(s). Todas continuam incluídas; confira antes de confirmar."
+        )
+        st.dataframe(result.duplicate_rows, hide_index=True, width="stretch")
+
+    def has_import_value(column: str) -> bool:
+        if column not in result.analysis_frame.columns:
+            return False
+        values = result.analysis_frame[column].astype("string").fillna("").str.strip()
+        return bool(values.ne("").any())
+
+    capability_rows = [
+        {"Análise": "Volume diário", "Situação": "Disponível" if result.mapping_ready and not result.analysis_frame.empty else "Indisponível: confira data e quantidade"},
+        {"Análise": "Pedidos / ticket / unidades por pedido", "Situação": "Disponível" if mapping.get("pedido_id") is not None and summary["missing_order_id_rows"] == 0 else "Indisponível ou incompleto: pedido_id ausente/incompleto"},
+        {"Análise": "Faturamento bruto", "Situação": "Disponível" if result.revenue_available else "Indisponível: preço inválido, ausente ou incompleto"},
+        {"Análise": "Produtos", "Situação": "Disponível" if has_import_value("produto") else "Indisponível: inclua produto"},
+        {"Análise": "Categorias", "Situação": "Disponível" if has_import_value("categoria") else "Indisponível: inclua categoria"},
+        {"Análise": "Tamanhos", "Situação": "Disponível" if has_import_value("tamanho") else "Indisponível: inclua tamanho"},
+        {"Análise": "Horários", "Situação": "Disponível" if has_import_value("hora") else "Indisponível: inclua hora"},
+        {"Análise": "Ingredientes", "Situação": "Disponível" if has_import_value("ingredientes") else "Indisponível: inclua ingredientes"},
+    ]
+    with st.expander("Análises compatíveis com este arquivo", expanded=True):
+        st.dataframe(pd.DataFrame(capability_rows), hide_index=True, width="stretch")
+
+    report_frame = result.issues if not result.issues.empty else pd.DataFrame(columns=[
+        "Número da linha original", "Coluna", "Valor encontrado", "Tipo", "Mensagem", "Ação recomendada"
+    ])
+    st.download_button(
+        "Baixar relatório de validação",
+        data=report_frame.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"relatorio_validacao_{file_key}.csv",
+        mime="text/csv",
+        key=f"csv_validation_report_{file_key}",
+    )
+    st.download_button(
+        "Baixar CSV original sem alterações",
+        data=file_bytes,
+        file_name=Path(file_name).name,
+        mime="text/csv",
+        key=f"csv_original_download_{file_key}",
+    )
+    st.caption(
+        "O CSV original permanece intacto. Linhas com data ou quantidade inválidas não entram nos cálculos que dependem "
+        "desses campos; linhas aparentemente duplicadas não são eliminadas."
+    )
+
+    if not mapping_confirmed:
+        st.info("Confirme o mapeamento após revisá-lo para continuar.")
+        st.stop()
+    if not result.mapping_ready:
+        st.error("Mapeie data e quantidade para liberar análises de vendas.")
+        st.stop()
+    if result.analysis_frame.empty:
+        st.error("Não há linhas com data e quantidade válidas para analisar.")
+        st.stop()
+    import_confirmed = st.checkbox(
+        "Revisei o diagnóstico e confirmo a análise. O CSV original e todas as suas linhas serão preservados.",
+        key=f"csv_import_confirm_{file_key}",
+    )
+    if not import_confirmed:
+        st.info("Após revisar o diagnóstico, confirme para abrir as análises.")
+        st.stop()
+
+    analysis_frame = result.analysis_frame.copy()
+    if not result.revenue_available and "preco_unitario" in analysis_frame:
+        analysis_frame["preco_unitario"] = ""
+    serialized = analysis_frame.to_csv(index=False, date_format="%Y-%m-%d").encode("utf-8-sig")
+    sales, quality = prepare_simple_sales(io.BytesIO(serialized))
+    # Keep product names separate from size for this generic import route.
+    if "produto" in analysis_frame:
+        sales["product"] = analysis_frame["produto"].astype("string").replace("", pd.NA).reset_index(drop=True)
+    if "order_id" in sales:
+        order_ids = sales["order_id"].astype("string").str.strip().replace("", pd.NA)
+        if order_identity == "date_order":
+            sales["order_key"] = [
+                f"{date}|{order_id}" if pd.notna(order_id) else pd.NA
+                for date, order_id in zip(sales["date"].dt.strftime("%Y-%m-%d"), order_ids)
+            ]
+        else:
+            sales["order_key"] = order_ids
+    quality.update(
+        {
+            "linhas comerciais válidas": int(len(sales)),
+            "linhas da origem preservadas": int(summary["total_rows"]),
+            "linhas com erros de data": int(summary["invalid_date_rows"]),
+            "linhas com erros de quantidade": int(summary["invalid_quantity_rows"]),
+            "grupos com possíveis duplicidades (mantidos)": int(summary["duplicate_groups"]),
+            "identidade do pedido": "data + pedido_id" if order_identity == "date_order" else "pedido_id global",
+            "calendário confirmado": int(calendar_confirmed),
+            "previsão liberada pela validação do calendário": int(result.forecast_ready),
+        }
+    )
+    source_label = f"CSV externo · {establishment_name} · {file_name}"
+    return sales, quality, result, source_label
+
+
 def main() -> None:
-    st.title("🍕 Análises da Pizzaria")
-    st.caption("Projeto Integrador IV · UNIVESP | Automação de dados e apoio à gestão de pizzarias")
+    st.title("🍕 Painel de Análise de Dados para Pizzarias")
+    st.caption("Projeto Integrador IV · UNIVESP | Python, SQL e Streamlit")
+    st.markdown(
+        "Ferramenta interativa para explorar vendas, identificar padrões de consumo, "
+        "acompanhar indicadores comerciais e apoiar decisões de negócio. O projeto começou "
+        "com uma base pública de vendas de pizzaria e foi ampliado para analisar dados de "
+        "outros estabelecimentos por meio de arquivos CSV."
+    )
+    mode_public_card, mode_external_card = st.columns(2)
+    with mode_public_card:
+        with st.container(border=True):
+            st.caption("BASE ORIGINAL DO PROJETO")
+            st.subheader("Base pública")
+            st.write(
+                "Conjunto Pizza Place Sales, usado no desenvolvimento da modelagem relacional, "
+                "do ETL, das consultas SQL e das análises originais."
+            )
+    with mode_external_card:
+        with st.container(border=True):
+            st.caption("ANÁLISE PERSONALIZADA")
+            st.subheader("Dados de outras pizzarias")
+            st.write(
+                "Carregue um CSV com as vendas do estabelecimento. O arquivo "
+                "`VENDAS_PIZZARIA_BAIRRO` é o estudo de caso anonimizado usado para demonstrar essa extensão."
+            )
 
     with st.sidebar:
         st.header("Dados e filtros")
         source = st.radio(
             "Fonte dos dados",
             [
-                "Base normalizada do projeto",
-                "Enviar CSV único da pizzaria",
-                "Enviar quatro CSVs da pizzaria",
-                "Banco SQL Server normalizado",
+                MODE_PUBLIC,
+                MODE_CASE_STUDY,
+                MODE_CUSTOM_CSV,
+                MODE_FOUR_CSVS,
+                MODE_SQL_SERVER,
             ],
         )
         uploaded: dict[str, object] = {}
         single_csv = None
         database_url = ""
         apply_project_recipe_rules = True
-        if source == "Base normalizada do projeto":
+        closed_weekday_labels = []
+        if source == MODE_PUBLIC:
             st.caption("Carrega as sete tabelas exportadas pelo ETL em data/normalized/.")
-        if source == "Enviar CSV único da pizzaria":
+        if source == MODE_CASE_STUDY:
             st.caption(
-                "Obrigatório: data e quantidade. Produto, pedido, hora, tamanho, preço e categoria "
-                "são opcionais; cada linha pode ser um dia ou um item vendido."
+                "Estudo de caso com identificação do estabelecimento omitida. "
+                "Fonte: output/VENDAS_PIZZARIA_BAIRRO.csv."
+            )
+            closed_weekday_labels = st.multiselect(
+                "Dias sem funcionamento",
+                DAY_NAMES,
+                default=[DAY_NAMES[0]],
+                help="O estudo de caso registra a segunda-feira como dia fechado. Isso afeta somente a série temporal.",
+            )
+        if source == MODE_CUSTOM_CSV:
+            st.caption(
+                "Importação guiada: revise o mapeamento, o calendário e o diagnóstico antes de liberar as análises."
             )
             single_csv = st.file_uploader(
                 "CSV de vendas",
                 type=["csv"],
                 key="upload_single_sales_csv",
             )
-            st.download_button(
-                "Baixar modelo de CSV",
-                data=(
-                    "data,quantidade,pedido_id,hora,produto,tamanho,preco_unitario,categoria,ingredientes\n"
-                    "2026-10-20,2,1001,18:30,Calabresa,M,35.90,Tradicional,\n"
-                    "2026-10-20,1,1001,18:30,Margherita,M,32.00,Vegetariana,\n"
-                ).encode("utf-8"),
-                file_name="modelo_vendas_pizzaria.csv",
-                mime="text/csv",
-            )
             st.caption(
-                "Com apenas data e quantidade, o painel mostra vendas diárias e previsão. "
-                "Os outros campos liberam somente as análises correspondentes."
+                "O estabelecimento define seu cardápio, moeda, dias e horários; nenhuma regra do estudo de caso é aplicada aqui."
             )
-        if source == "Enviar quatro CSVs da pizzaria":
+        if source == MODE_FOUR_CSVS:
             st.caption("Envie as quatro tabelas do sistema de vendas. Os campos mínimos estão no manual do painel.")
             for key, label in [
                 ("orders", "orders.csv — pedidos"),
@@ -1059,7 +1544,12 @@ def main() -> None:
                     "sem outro molho. Desmarque se essas regras não representarem o cardápio da pizzaria."
                 ),
             )
-        elif source == "Banco SQL Server normalizado":
+            closed_weekday_labels = st.multiselect(
+                "Dias sem funcionamento (opcional)",
+                DAY_NAMES,
+                default=[],
+            )
+        elif source == MODE_SQL_SERVER:
             database_url = os.environ.get("PIZZA_DATABASE_URL", "").strip()
             st.caption("Conexão somente para leitura. Configure PIZZA_DATABASE_URL no ambiente antes de iniciar o app.")
             if database_url:
@@ -1074,7 +1564,7 @@ def main() -> None:
         currency_label = st.selectbox(
             "Símbolo da moeda exibida (sem conversão)",
             symbol_options,
-            index=0 if source == "Base normalizada do projeto" else 1,
+            index=0 if source in (MODE_PUBLIC, MODE_SQL_SERVER) else 1,
         )
         currency_symbol = "" if currency_label == "Sem símbolo" else currency_label
 
@@ -1083,19 +1573,29 @@ def main() -> None:
         st.caption("Polo CEU Anhanguera · Polo CEU Carrão")
         st.caption("Orientador: Vinícius Alexandre Ramos Simão")
 
+    if source == MODE_CUSTOM_CSV:
+        render_csv_preparation_guide("before_upload")
+        if single_csv is None:
+            st.info("Baixe o modelo se precisar e envie seu arquivo CSV para iniciar a validação.")
+            st.stop()
+
+    custom_import_result = None
     try:
         sql_connected = False
         sql_fallback_message = None
-        if source == "Base normalizada do projeto":
+        if source == MODE_PUBLIC:
             sales, quality = load_project_normalized_csvs()
-            source_label = "camada normalizada do ETL · data/normalized/"
-        elif source == "Enviar CSV único da pizzaria":
-            if single_csv is None:
-                st.info("Envie um CSV com, no mínimo, as colunas data e quantidade.")
+            source_label = "base pública original Pizza Place Sales · camada normalizada em data/normalized/"
+        elif source == MODE_CASE_STUDY:
+            if not CASE_STUDY_CSV_PATH.exists():
+                st.error(f"O CSV do estudo de caso não foi encontrado: {CASE_STUDY_CSV_PATH}")
                 st.stop()
-            sales, quality = prepare_simple_sales(single_csv)
-            source_label = "CSV único da pizzaria · tratado em memória"
-        elif source == "Enviar quatro CSVs da pizzaria":
+            case_data = io.BytesIO(CASE_STUDY_CSV_PATH.read_bytes())
+            sales, quality = prepare_simple_sales(case_data)
+            source_label = "CSV do estudo de caso · VENDAS_PIZZARIA_BAIRRO (estabelecimento anonimizado)"
+        elif source == MODE_CUSTOM_CSV:
+            sales, quality, custom_import_result, source_label = render_external_csv_wizard(single_csv)
+        elif source == MODE_FOUR_CSVS:
             if len(uploaded) != len(REQUIRED_UPLOADS):
                 st.info("Envie os quatro CSVs para montar o painel. A base normalizada do projeto continua disponível.")
                 st.stop()
@@ -1103,14 +1603,14 @@ def main() -> None:
                 uploaded,
                 apply_project_recipe_rules=apply_project_recipe_rules,
             )
-            source_label = "CSVs tratados e normalizados nesta sessão"
+            source_label = "CSVs externos carregados pelo usuário · normalizados em memória"
         else:
             try:
                 if not database_url:
                     raise RuntimeError("PIZZA_DATABASE_URL não está configurada.")
                 sales, quality = load_sql_server(database_url)
                 sql_connected = True
-                source_label = "SQL Server · PizzaSales normalizado"
+                source_label = "base pública original · SQL Server PizzaSales normalizado"
             except Exception as sql_error:
                 try:
                     sales, quality = load_project_normalized_csvs()
@@ -1119,7 +1619,7 @@ def main() -> None:
                         "SQL Server/ODBC não conectou e os CSVs normalizados locais não puderam ser carregados. "
                         f"SQL Server: {sql_error}. Base local: {fallback_error}"
                     ) from fallback_error
-                source_label = "base normalizada local · alternativa ao SQL Server"
+                source_label = "base pública original · CSVs normalizados locais (alternativa ao SQL Server)"
                 error_text = str(sql_error)
                 if "libodbc.so" in error_text.lower() or "unixodbc" in error_text.lower():
                     connection_cause = (
@@ -1142,12 +1642,21 @@ def main() -> None:
 
     min_date = sales["date"].min().date()
     max_date = sales["date"].max().date()
+    if source in (MODE_PUBLIC, MODE_SQL_SERVER):
+        chart_source_label = "Base pública · Pizza Place Sales"
+    elif source == MODE_CASE_STUDY:
+        chart_source_label = "Estudo de caso · VENDAS_PIZZARIA_BAIRRO"
+    elif source == MODE_CUSTOM_CSV:
+        chart_source_label = f"CSV · {getattr(single_csv, 'name', 'arquivo carregado')}"
+    else:
+        chart_source_label = "CSV externo da pizzaria"
     with st.sidebar:
         selected_dates = st.date_input(
             "Período analisado",
             value=(min_date, max_date),
             min_value=min_date,
             max_value=max_date,
+            format="DD/MM/YYYY",
         )
         categories_available = sales["category"].notna().any()
         sizes_available = sales["size"].notna().any()
@@ -1173,43 +1682,106 @@ def main() -> None:
     if selected_sizes is not None:
         filter_mask &= sales["size"].isna() | sales["size"].astype(str).isin(selected_sizes)
     filtered = sales.loc[filter_mask].copy()
-    has_revenue = bool(sales["revenue"].notna().all() and sales["revenue"].notna().any())
-    has_order_ids = bool(sales["order_id"].notna().all() and sales["order_id"].notna().any())
-    has_product = bool(filtered["product"].notna().any())
-    has_category = bool(filtered["category"].notna().any())
-    has_size = bool(filtered["size"].notna().any())
-    has_hour = bool(filtered["hour"].notna().any())
-    has_ingredients = bool(filtered["ingredients"].notna().any())
+    commercial_mask = filtered["quantity"].gt(0)
+    if filtered["order_id"].notna().any():
+        if source != MODE_CUSTOM_CSV:
+            commercial_mask &= filtered["order_id"].notna()
+    commercial_filtered = filtered.loc[commercial_mask].copy()
+    is_external_source = source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV, MODE_FOUR_CSVS)
+    closed_weekdays = tuple(DAY_NAMES.index(day) for day in closed_weekday_labels)
+    if source == MODE_CUSTOM_CSV and custom_import_result is not None:
+        closed_weekdays = custom_import_result.closed_weekdays
+    if is_external_source:
+        daily_series = build_daily_sales_series(
+            filtered,
+            start_date,
+            end_date,
+            closed_weekdays=closed_weekdays,
+        )
+        if source == MODE_CUSTOM_CSV and custom_import_result is not None:
+            closed_sales_dates = set(custom_import_result.summary.get("closed_dates_with_sales", []))
+            for unknown_day in custom_import_result.unknown_dates:
+                if unknown_day not in pd.DatetimeIndex(daily_series["date"]):
+                    continue
+                if unknown_day in closed_sales_dates:
+                    observed = filtered.loc[filtered["date"].eq(unknown_day), "quantity"].sum()
+                    daily_series.loc[daily_series["date"].eq(unknown_day), "quantity"] = float(observed)
+                else:
+                    daily_series.loc[daily_series["date"].eq(unknown_day), "quantity"] = np.nan
+    else:
+        complete_dates = pd.date_range(
+            pd.Timestamp(start_date).normalize(),
+            pd.Timestamp(end_date).normalize(),
+            freq="D",
+        )
+        daily_series = (
+            filtered.groupby("date", as_index=False)["quantity"]
+            .sum()
+            .set_index("date")
+            .reindex(complete_dates, fill_value=0)
+            .rename_axis("date")
+            .reset_index()
+        )
+    has_revenue = bool(
+        not commercial_filtered.empty
+        and commercial_filtered["revenue"].notna().all()
+        and commercial_filtered["revenue"].notna().any()
+    )
+    order_id_series = commercial_filtered["order_id"].astype("string").str.strip().replace("", pd.NA)
+    has_order_ids = bool(order_id_series.notna().any())
+    complete_order_ids = bool(not commercial_filtered.empty and order_id_series.notna().all())
+    if source == MODE_CUSTOM_CSV and "order_key" in commercial_filtered:
+        order_count = int(commercial_filtered["order_key"].nunique(dropna=True)) if has_order_ids else None
+    else:
+        order_count = int(order_id_series.nunique(dropna=True)) if has_order_ids else None
+    has_product = bool(commercial_filtered["product"].notna().any())
+    has_category = bool(commercial_filtered["category"].notna().any())
+    has_size = bool(commercial_filtered["size"].notna().any())
+    has_hour = bool(commercial_filtered["hour"].notna().any())
+    has_ingredients = bool(commercial_filtered["ingredients"].notna().any())
 
+    valid_record_count = quality.get("linhas comerciais válidas", len(sales))
     st.caption(
-        f"Fonte: {source_label} · Período disponível: {min_date:%d/%m/%Y} a {max_date:%d/%m/%Y} · "
-        "Receita é bruta; a base não contém custos para calcular lucro."
+        f"Fonte: {source_label} · Período: {min_date:%d/%m/%Y} a {max_date:%d/%m/%Y} · "
+        f"Registros comerciais válidos: {valid_record_count}. Receita é bruta, não lucro."
     )
     if sql_fallback_message:
         st.warning(sql_fallback_message)
-    if source == "Base normalizada do projeto":
+    if source == MODE_PUBLIC:
         st.success(
             "Análise conectada às tabelas normalizadas do ETL: pedidos → itens → pizzas → tipos → categorias; "
             "ingredientes entram pela associação pizza_type_ingredients."
         )
-    elif source == "Banco SQL Server normalizado" and sql_connected:
+    elif source == MODE_SQL_SERVER and sql_connected:
         st.success("Análise executada por consultas somente de leitura nas tabelas normalizadas do SQL Server.")
-    elif source == "Banco SQL Server normalizado":
+    elif source == MODE_SQL_SERVER:
         st.info("Os indicadores abaixo estão usando os CSVs normalizados locais.")
     else:
         st.info(
             "Os dados enviados foram validados e preparados em memória. "
             "Campos ausentes não são inventados; as análises dependentes deles ficam indisponíveis."
         )
+    if source == MODE_CUSTOM_CSV and custom_import_result is not None:
+        if not complete_order_ids:
+            st.warning(
+                "Há linhas comerciais sem pedido_id. Elas permanecem nas vendas por produto e volume, "
+                "mas não entram na contagem de pedidos; ticket médio e unidades por pedido ficam indisponíveis."
+            )
+        if not has_revenue:
+            st.info("Faturamento e ticket médio exigem preço unitário positivo e preenchido em todas as linhas comerciais válidas.")
+        if custom_import_result.unknown_dates:
+            st.warning(
+                f"A série temporal contém {len(custom_import_result.unknown_dates)} dia(s) sem informação confirmada. "
+                "Esses pontos são mostrados como lacunas e não serão tratados como zero."
+            )
     if filtered.empty:
         st.warning("Nenhuma venda corresponde aos filtros. Ajuste o período, as categorias ou os tamanhos.")
         st.stop()
 
-    total_quantity = float(filtered["quantity"].sum())
-    total_revenue = float(filtered["revenue"].sum()) if has_revenue else 0.0
-    order_count = int(filtered["order_id"].nunique()) if has_order_ids else None
-    average_ticket = total_revenue / order_count if has_revenue and order_count else None
-    average_pizzas = total_quantity / order_count if order_count else None
+    total_quantity = float(commercial_filtered["quantity"].sum())
+    total_revenue = float(commercial_filtered["revenue"].sum()) if has_revenue else 0.0
+    average_ticket = total_revenue / order_count if has_revenue and order_count and complete_order_ids else None
+    average_pizzas = total_quantity / order_count if order_count and complete_order_ids else None
 
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     kpi1.metric(
@@ -1226,7 +1798,7 @@ def main() -> None:
     kpi4.metric("Valor médio por pedido", format_money(average_ticket, currency_symbol) if average_ticket is not None else "—")
     kpi5.metric("Pizzas por pedido", format_number(average_pizzas, 2) if average_pizzas is not None else "—")
 
-    overview_tab, menu_tab, peak_tab, ingredient_tab, forecast_tab, model_tab, sql_tab = st.tabs(
+    overview_tab, menu_tab, peak_tab, ingredient_tab, forecast_tab, model_tab, sql_tab, data_sources_tab = st.tabs(
         [
             "Visão geral",
             "Cardápio",
@@ -1234,13 +1806,15 @@ def main() -> None:
             "Ingredientes",
             "Previsão",
             "ETL e modelo",
-            "Consultas SQL",
+            "SQL · Base pública",
+            "Sobre os dados",
         ]
     )
 
     with model_tab:
-        if source == "Enviar CSV único da pizzaria":
-            st.subheader("CSV simples preparado em memória")
+        st.caption(f"Fonte desta seção: {source_label}.")
+        if source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV):
+            st.subheader("CSV de vendas preparado em memória")
             st.info(
                 "O arquivo enviado não é gravado no banco nem convertido em sete tabelas permanentes. "
                 "O painel usa apenas os campos disponíveis e não inventa categorias, pedidos, preços ou receitas."
@@ -1251,9 +1825,9 @@ def main() -> None:
                 "Os gráficos deste painel partem das tabelas relacionais abaixo. "
                 "O cardápio usa as chaves de categoria; a análise de ingredientes usa a dimensão e a tabela associativa."
             )
-        if source == "Enviar CSV único da pizzaria":
+        if source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV):
             table_rows = [
-                {"Tabela carregada": "CSV simples (em memória)", "Registros": len(sales)}
+                {"Fonte carregada": source_label, "Registros válidos": quality.get("linhas comerciais válidas", len(sales))}
             ]
         else:
             table_order = [
@@ -1273,8 +1847,8 @@ def main() -> None:
                 for table_name in table_order
             ]
         st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch")
-        if source == "Enviar CSV único da pizzaria":
-            st.caption("O CSV é usado somente nesta sessão e permanece no formato que a pizzaria forneceu.")
+        if source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV):
+            st.caption("O CSV é processado somente em memória; os dados de origem não são alterados.")
         else:
             st.markdown(
                 "**Relacionamentos aplicados:** `orders 1:N order_details`; `pizzas 1:N order_details`; "
@@ -1291,9 +1865,9 @@ def main() -> None:
     with sql_tab:
         st.subheader("Consultas SQL do projeto")
         st.caption(
-            "Selecione uma consulta do arquivo 03_analysis_queries.sql. A execução usa o SQL Server "
+            "Fonte desta seção: base pública original Pizza Place Sales. Selecione uma consulta do arquivo 03_analysis_queries.sql. A execução usa o SQL Server "
             "quando ele está conectado; sem essa conexão, usa as sete tabelas normalizadas locais. "
-            "Estas consultas usam a base do projeto, não o CSV simples enviado nesta sessão."
+            "Estas consultas são independentes do CSV externo selecionado para os indicadores do painel."
         )
         try:
             available_queries = load_analysis_queries()
@@ -1306,7 +1880,7 @@ def main() -> None:
 
             query_database_url = (
                 database_url
-                if source == "Banco SQL Server normalizado"
+                if source == MODE_SQL_SERVER
                 else os.environ.get("PIZZA_DATABASE_URL", "").strip()
             )
             result, execution_source = execute_analysis_query(
@@ -1315,7 +1889,7 @@ def main() -> None:
                 require_sql_server=False,
             )
             st.caption(f"Executada em: {execution_source}")
-            if source == "Banco SQL Server normalizado" and execution_source.startswith("SQLite"):
+            if source == MODE_SQL_SERVER and execution_source.startswith("SQLite"):
                 st.warning("SQL Server/ODBC indisponível nesta execução; a consulta foi executada na base normalizada local.")
             if result.empty:
                 st.info("A consulta foi executada sem erros e não retornou linhas.")
@@ -1324,15 +1898,34 @@ def main() -> None:
             st.error(f"Não foi possível carregar ou executar a consulta: {error}")
 
     with overview_tab:
+        st.caption(f"Fonte desta seção: {source_label}.")
         st.subheader("Evolução das vendas")
-        daily_aggregations = {"quantity": ("quantity", "sum")}
-        if has_revenue:
-            daily_aggregations["revenue"] = ("revenue", "sum")
-        daily_summary = (
-            filtered.groupby("date", as_index=False)
-            .agg(**daily_aggregations)
-            .sort_values("date")
-        )
+        if is_external_source:
+            daily_summary = daily_series.copy()
+            if has_revenue:
+                revenue_by_date = (
+                    commercial_filtered.groupby("date")["revenue"]
+                    .sum()
+                    .reindex(pd.DatetimeIndex(daily_summary["date"]), fill_value=0)
+                )
+                daily_summary["revenue"] = revenue_by_date.to_numpy()
+            if source == MODE_CUSTOM_CSV and custom_import_result is not None:
+                unresolved = set(custom_import_result.unknown_dates) - set(
+                    custom_import_result.summary.get("closed_dates_with_sales", [])
+                )
+                unknown_mask = pd.DatetimeIndex(daily_summary["date"]).isin(unresolved)
+                daily_summary.loc[unknown_mask, "quantity"] = np.nan
+                if has_revenue:
+                    daily_summary.loc[unknown_mask, "revenue"] = np.nan
+        else:
+            daily_aggregations = {"quantity": ("quantity", "sum")}
+            if has_revenue:
+                daily_aggregations["revenue"] = ("revenue", "sum")
+            daily_summary = (
+                filtered.groupby("date", as_index=False)
+                .agg(**daily_aggregations)
+                .sort_values("date")
+            )
         if has_revenue:
             left, right = st.columns(2)
             with left:
@@ -1341,7 +1934,7 @@ def main() -> None:
                     x="date",
                     y="revenue",
                     markers=True,
-                    title="Receita bruta por dia",
+                    title=f"Receita bruta por dia · {chart_source_label}",
                     labels={"date": "Data", "revenue": "Receita (moeda da base)"},
                 )
                 revenue_fig.update_traces(line_color="#176B87")
@@ -1353,7 +1946,7 @@ def main() -> None:
                     x="date",
                     y="quantity",
                     markers=True,
-                    title="Pizzas vendidas por dia",
+                    title=f"Pizzas vendidas por dia · {chart_source_label}",
                     labels={"date": "Data", "quantity": "Pizzas"},
                 )
                 quantity_fig.update_traces(line_color="#E07A2D")
@@ -1366,7 +1959,7 @@ def main() -> None:
                 x="date",
                 y="quantity",
                 markers=True,
-                title="Pizzas vendidas por dia",
+                title=f"Pizzas vendidas por dia · {chart_source_label}",
                 labels={"date": "Data", "quantity": "Pizzas"},
             )
             revenue_fig.update_traces(line_color="#E07A2D")
@@ -1374,15 +1967,29 @@ def main() -> None:
             st.plotly_chart(revenue_fig, width="stretch")
 
         st.subheader("Resumo por dia da semana")
-        weekday_summary = (
-            filtered.groupby("weekday", observed=False, as_index=False)
-            .agg(pizzas=("quantity", "sum"))
-        )
+        if is_external_source:
+            weekday_totals = (
+                daily_series.assign(weekday_num=daily_series["date"].dt.day_of_week)
+                .groupby("weekday_num")["quantity"]
+                .sum()
+                .reindex(range(7), fill_value=0)
+            )
+            weekday_summary = pd.DataFrame(
+                {
+                    "weekday": pd.Categorical(DAY_NAMES, categories=DAY_NAMES, ordered=True),
+                    "pizzas": weekday_totals.to_numpy(),
+                }
+            )
+        else:
+            weekday_summary = (
+                filtered.groupby("weekday", observed=False, as_index=False)
+                .agg(pizzas=("quantity", "sum"))
+            )
         weekday_fig = px.bar(
             weekday_summary,
             x="weekday",
             y="pizzas",
-            title="Volume de pizzas por dia da semana",
+            title=f"Volume de pizzas por dia da semana · {chart_source_label}",
             labels={"weekday": "Dia", "pizzas": "Pizzas vendidas"},
             category_orders={"weekday": DAY_NAMES},
             color="pizzas",
@@ -1391,6 +1998,7 @@ def main() -> None:
         st.plotly_chart(weekday_fig, width="stretch")
 
     with menu_tab:
+        st.caption(f"Fonte desta seção: {source_label}.")
         st.subheader("Desempenho do cardápio")
         menu_available = has_product or has_category or has_size
         if not menu_available:
@@ -1401,7 +2009,7 @@ def main() -> None:
                 if has_revenue:
                     category_aggregations["receita"] = ("revenue", "sum")
                 category_summary = (
-                    filtered.dropna(subset=["category"])
+                    commercial_filtered.dropna(subset=["category"])
                     .groupby("category", as_index=False)
                     .agg(**category_aggregations)
                 )
@@ -1412,7 +2020,11 @@ def main() -> None:
                         x="category",
                         y=metric_column,
                         color="category",
-                        title="Receita bruta por categoria" if has_revenue else "Pizzas vendidas por categoria",
+                        title=(
+                            f"Receita bruta por categoria · {chart_source_label}"
+                            if has_revenue
+                            else f"Pizzas vendidas por categoria · {chart_source_label}"
+                        ),
                         labels={
                             "category": "Categoria",
                             metric_column: "Receita (moeda da base)" if has_revenue else "Pizzas vendidas",
@@ -1424,7 +2036,7 @@ def main() -> None:
 
             if has_size:
                 size_summary = (
-                    filtered.dropna(subset=["size"])
+                    commercial_filtered.dropna(subset=["size"])
                     .groupby("size", as_index=False)
                     .agg(pizzas=("quantity", "sum"))
                 )
@@ -1433,7 +2045,7 @@ def main() -> None:
                         size_summary,
                         names="size",
                         values="pizzas",
-                        title="Participação dos tamanhos nas unidades vendidas",
+                        title=f"Participação dos tamanhos nas unidades vendidas · {chart_source_label}",
                         labels={"size": "Tamanho", "pizzas": "Pizzas vendidas"},
                         hole=0.45,
                     )
@@ -1448,7 +2060,7 @@ def main() -> None:
                 product_aggregations = {"pizzas": ("quantity", "sum")}
                 if has_revenue:
                     product_aggregations["receita"] = ("revenue", "sum")
-                top_products = filtered.groupby(group_columns, as_index=False, dropna=False).agg(
+                top_products = commercial_filtered.groupby(group_columns, as_index=False, dropna=False).agg(
                     **product_aggregations
                 )
                 top_products = top_products.sort_values(
@@ -1474,6 +2086,7 @@ def main() -> None:
                 )
 
     with peak_tab:
+        st.caption(f"Fonte desta seção: {source_label}.")
         st.subheader("Em quais horários se concentra o movimento?")
         if not has_hour:
             st.info("O CSV não informa horário. Inclua uma coluna hora/horario para analisar picos intradiários.")
@@ -1482,7 +2095,7 @@ def main() -> None:
                 "O mapa mostra o volume de pizzas por dia e hora informados. "
                 "Ele apoia a escala, mas não mede tempo de preparo nem capacidade da cozinha."
             )
-            timed_sales = filtered.dropna(subset=["hour"]).copy()
+            timed_sales = commercial_filtered.dropna(subset=["hour"]).copy()
             if timed_sales.empty:
                 st.info("Não há horários válidos no período filtrado.")
             else:
@@ -1500,7 +2113,7 @@ def main() -> None:
                     aspect="auto",
                     color_continuous_scale="Oranges",
                     labels={"x": "Hora do pedido", "y": "Dia da semana", "color": "Pizzas"},
-                    title="Mapa de calor: pizzas vendidas por dia e hora",
+                    title=f"Mapa de calor: pizzas vendidas por dia e hora · {chart_source_label}",
                 )
                 heatmap_fig.update_xaxes(tickmode="array", tickvals=list(range(24)), ticktext=[f"{hour:02d}h" for hour in range(24)])
                 st.plotly_chart(heatmap_fig, width="stretch")
@@ -1515,18 +2128,19 @@ def main() -> None:
                 )
 
     with ingredient_tab:
+        st.caption(f"Fonte desta seção: {source_label}.")
         st.subheader("Ingredientes associados às vendas")
         if not has_ingredients:
             st.info("A origem não trouxe a lista de ingredientes. Ela é necessária para esta análise.")
         else:
-            if source == "Enviar CSV único da pizzaria":
+            if source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV):
                 st.caption("A lista de ingredientes veio do CSV enviado; o painel não acrescenta ingredientes por suposição.")
             else:
                 st.caption(
                     "A composição vem da dimensão ingredients e da tabela associativa "
                     "pizza_type_ingredients. Em CSV, o painel reproduz as regras de limpeza do ETL do projeto."
                 )
-            ingredient_lines = filtered[["ingredients", "quantity"]].dropna(subset=["ingredients"]).copy()
+            ingredient_lines = commercial_filtered[["ingredients", "quantity"]].dropna(subset=["ingredients"]).copy()
             ingredient_lines = ingredient_lines.reset_index(drop=True)
             ingredient_lines["sale_line_id"] = range(len(ingredient_lines))
             ingredient_lines["ingredient"] = ingredient_lines["ingredients"].astype(str).str.split(r"[,;]")
@@ -1552,7 +2166,7 @@ def main() -> None:
                 x="pizzas em receitas com o ingrediente",
                 y="ingredient",
                 orientation="h",
-                title="Pizzas vendidas em receitas que incluem o ingrediente",
+                title=f"Pizzas vendidas em receitas que incluem o ingrediente · {chart_source_label}",
                 labels={"ingredient": "Ingrediente", "pizzas em receitas com o ingrediente": "Pizzas"},
                 color="pizzas em receitas com o ingrediente",
                 color_continuous_scale="Oranges",
@@ -1565,42 +2179,37 @@ def main() -> None:
             )
 
     with forecast_tab:
+        st.caption(f"Fonte desta seção: {source_label}.")
         st.subheader("Previsão de demanda para sete dias")
         st.caption(
-            "A regressão usa as vendas do período filtrado e calcula dia da semana, tendência, "
-            "lag_7d, rolling_7d, início do mês e sazonalidade mensal."
+            "A regressão usa a série diária completa somente quando o calendário e os dias sem registro "
+            "permitem interpretar a série. Dias confirmados como fechados recebem previsão zero; nos demais, "
+            "é usado o modelo existente."
         )
-        forecast_daily = (
-            filtered.groupby("date", as_index=False)["quantity"]
-            .sum()
-            .set_index("date")
-            .sort_index()
-        )
-        complete_dates = pd.date_range(pd.Timestamp(start_date), pd.Timestamp(end_date), freq="D")
-        forecast_blocked_for_missing_days = (
-            source == "Enviar CSV único da pizzaria"
-            and quality.get("dias sem linha entre a primeira e a última data", 0) > 0
-        )
-        if forecast_blocked_for_missing_days:
-            missing_days = quality["dias sem linha entre a primeira e a última data"]
+        forecast_daily = daily_series.copy()
+        if source == MODE_CUSTOM_CSV and custom_import_result is not None and not custom_import_result.forecast_ready:
             st.info(
-                f"A previsão foi suspensa: há {missing_days} dia(s) sem linha no CSV entre a primeira e a última data. "
-                "Para não interpretar falta de registro como zero vendas, inclua todos os dias do período e use "
-                "quantidade 0 nos dias sem venda ou em que a pizzaria ficou fechada."
+                "Previsão suspensa: confirme o calendário, confira as linhas com data/quantidade inválidas e "
+                "resolva os dias desconhecidos. A série diária não substituirá esses valores por zero."
             )
-        forecast_daily = forecast_daily.reindex(complete_dates, fill_value=0)
-        forecast_daily.index.name = "date"
-        forecast_daily = forecast_daily.reset_index()
-        if not forecast_blocked_for_missing_days and len(forecast_daily) < 56:
+        elif len(forecast_daily) < 56:
             st.info(
                 f"Selecione um período com pelo menos 56 dias completos. "
                 f"O período atual tem {len(forecast_daily)} dias."
             )
-        elif not forecast_blocked_for_missing_days:
+        else:
             try:
                 model_module = load_forecast_module()
                 test_size = max(14, int(np.ceil(len(forecast_daily) * 0.20)))
-                metrics, backtest = model_module.evaluate_walk_forward(forecast_daily, test_size)
+                if closed_weekdays:
+                    metrics, backtest = evaluate_pizzeria_walk_forward(
+                        model_module,
+                        forecast_daily,
+                        test_size,
+                        closed_weekdays=closed_weekdays,
+                    )
+                else:
+                    metrics, backtest = model_module.evaluate_walk_forward(forecast_daily, test_size)
                 origin_date = pd.Timestamp(forecast_daily["date"].iloc[0])
                 history = forecast_daily.set_index("date")["quantity"].astype(float)
                 x_all, y_all = model_module.make_training_data(history, origin_date)
@@ -1608,13 +2217,23 @@ def main() -> None:
                 forecast_dates = pd.date_range(
                     forecast_daily["date"].iloc[-1] + pd.Timedelta(days=1), periods=7, freq="D"
                 )
-                predictions, forecast_features = model_module.predict_recursively(
-                    model, history, forecast_dates, origin_date
-                )
+                if closed_weekdays:
+                    predictions, forecast_features = predict_pizzeria_recursively(
+                        model_module,
+                        model,
+                        history,
+                        forecast_dates,
+                        origin_date,
+                        closed_weekdays=closed_weekdays,
+                    )
+                else:
+                    predictions, forecast_features = model_module.predict_recursively(
+                        model, history, forecast_dates, origin_date
+                    )
                 mae = metrics["mae"]
                 forecast_table = pd.DataFrame(
                     {
-                        "Data": forecast_dates.date,
+                        "Data": forecast_dates.strftime("%d/%m/%Y"),
                         "Dia": [DAY_NAMES[date.day_of_week] for date in forecast_dates],
                         "Venda na semana anterior": np.rint(forecast_features["lag_7d"].to_numpy()).astype(int),
                         "Média móvel 7 dias": np.round(forecast_features["rolling_7d"].to_numpy(), 1),
@@ -1642,19 +2261,89 @@ def main() -> None:
                 fig.add_trace(go.Scatter(x=forecast_dates, y=np.maximum(0, predictions - mae), mode="lines", line={"width": 0}, fill="tonexty", fillcolor="rgba(168,50,90,0.16)", name="Faixa indicativa ± MAE", hoverinfo="skip"))
                 fig.add_trace(go.Scatter(x=forecast_dates, y=predictions, mode="lines+markers", name="Previsão 7 dias", line={"color": "#A8325A", "width": 3}))
                 fig.update_layout(
-                    title="Vendas reais, avaliação do modelo e previsão",
+                    title=f"Vendas reais, avaliação do modelo e previsão · {chart_source_label}",
                     xaxis_title="Data",
                     yaxis_title="Pizzas",
                     hovermode="x unified",
                     legend_title="Série",
                 )
+                fig.update_xaxes(tickformat="%d/%m/%Y")
                 st.plotly_chart(fig, width="stretch")
                 st.caption("A faixa previsão ± MAE é indicativa, não um intervalo de confiança. A previsão inicia no dia seguinte ao fim do período selecionado.")
             except Exception as error:
                 st.error(f"Não foi possível calcular a previsão: {error}")
 
+    with data_sources_tab:
+        st.subheader("De onde vêm os dados")
+        st.markdown(
+            "O painel tem duas etapas de uso: a base pública serviu ao desenvolvimento técnico original; "
+            "a ingestão de CSV foi acrescentada depois para que outras pizzarias possam analisar seus próprios dados. "
+            "As fontes são carregadas e analisadas separadamente."
+        )
+        public_column, external_column = st.columns(2)
+        with public_column:
+            with st.container(border=True):
+                st.markdown("**Base pública original — Pizza Place Sales**")
+                st.write(
+                    "Conjunto divulgado para o Maven Pizza Challenge e creditado na página do conjunto a "
+                    "Vincent Arel-Bundock / Rdatasets. O desafio descreve vendas de um estabelecimento fictício; "
+                    "portanto, esses valores não pertencem à Pizzaria de Bairro."
+                )
+                st.markdown(
+                    "Origem: [Maven Pizza Challenge](https://mavenanalytics.io/challenges/maven-pizza-challenge)  \n"
+                    "Crédito e licença informada: [Pizza Place Sales — Maven Data Playground](https://status.mavenanalytics.io/data-playground/pizza-place-sales)  \n"
+                    "Período da base local: 01/01/2015 a 31/12/2015."
+                )
+                st.write(
+                    f"Registros de itens na camada normalizada: "
+                    f"{quality.get('tabela order_details (registros)', 'não disponível')}; "
+                    f"pedidos: {quality.get('tabela orders (registros)', 'não disponível')}. "
+                    "A base está organizada em sete tabelas relacionais: orders, order_details, pizzas, "
+                    "pizza_types, categories, ingredients e pizza_type_ingredients."
+                )
+                st.caption(
+                    "Os valores monetários e as categorias da base pública pertencem ao contexto original do conjunto; "
+                    "a seleção de moeda altera somente o símbolo, sem conversão."
+                )
+        with external_column:
+            with st.container(border=True):
+                st.markdown("**CSV externo — análise personalizada**")
+                st.write(
+                    "O modo CSV processa dados de um estabelecimento escolhido pelo usuário. "
+                    "O estudo de caso utilizado nesta apresentação é o arquivo "
+                    "`VENDAS_PIZZARIA_BAIRRO.csv`; o nome comercial foi omitido para preservar a identificação. "
+                    "O arquivo representa dados da pizzaria de bairro, não a base pública."
+                )
+                st.write(
+                    f"Fonte selecionada agora: {source_label}. Período visível: "
+                    f"{min_date:%d/%m/%Y} a {max_date:%d/%m/%Y}; "
+                    f"{quality.get('linhas comerciais válidas', len(sales))} registros comerciais válidos."
+                )
+                st.markdown(
+                    "Para uma nova análise, carregue um CSV próprio. O painel reconhece `data`/`date` e "
+                    "`quantidade`/`quantity` como campos obrigatórios. `pedido_id`, `hora`, `produto`, `tamanho`, "
+                    "`preco_unitario`, `categoria` e `ingredientes` são opcionais; cada um habilita somente "
+                    "as análises correspondentes."
+                )
+                st.caption(
+                    "Datas podem ser fornecidas em AAAA-MM-DD; preço unitário deve ser informado por unidade. "
+                    "A moeda é declarada pelo usuário e não é convertida. Sem custos registrados, receita bruta não é lucro."
+                )
+        st.markdown("**Modelo de arquivo**")
+        st.download_button(
+            "Baixar modelo de CSV para vendas",
+            data=CSV_TEMPLATE_PATH.read_bytes(),
+            file_name="modelo_csv_vendas_pizzaria.csv",
+            mime="text/csv",
+            key="download_generic_sales_template",
+        )
+        st.caption(
+            "No modelo, cada linha representa um item vendido; quantidade é o número de unidades da linha. "
+            "O período, cardápio, tamanhos, categorias e funcionamento devem refletir cada estabelecimento."
+        )
+
     with st.expander("Qualidade dos dados e interpretação"):
-        if source == "Enviar CSV único da pizzaria":
+        if source in (MODE_CASE_STUDY, MODE_CUSTOM_CSV):
             st.write(
                 "O CSV é tratado em memória. Data e quantidade são obrigatórias; cada análise adicional "
                 "depende de seu respectivo campo estar preenchido. Valores ausentes não são estimados."
@@ -1670,19 +2359,19 @@ def main() -> None:
                 "passam pela validação e normalização em memória. Categorias e ingredientes são relacionados "
                 "por suas dimensões e pela tabela associativa. Chaves sem correspondência são contabilizadas."
             )
-        if source == "Enviar quatro CSVs da pizzaria" and not apply_project_recipe_rules:
+        if source == MODE_FOUR_CSVS and not apply_project_recipe_rules:
             st.markdown(
                 "**Tratamento aplicado aos CSVs enviados:** categorias separadas em dimensão própria; "
                 "ingredientes divididos, espaços removidos e `Artichoke` padronizado para `Artichokes`. "
                 "As regras de adição de mozzarella e molho foram desmarcadas para respeitar o cardápio informado."
             )
-        elif source == "Enviar quatro CSVs da pizzaria":
+        elif source == MODE_FOUR_CSVS:
             st.markdown(
                 "**Tratamento aplicado aos CSVs enviados:** categorias separadas em dimensão própria; "
                 "ingredientes divididos, espaços removidos, `Artichoke` padronizado para `Artichokes`, "
                 "Mozzarella Cheese adicionado e Tomato Sauce incluído quando não há outro molho."
             )
-        elif source in ("Base normalizada do projeto", "Banco SQL Server normalizado"):
+        elif source in (MODE_PUBLIC, MODE_SQL_SERVER):
             st.markdown(
                 "**Regras do ETL gravadas na camada normalizada:** divisão da lista de ingredientes; "
                 "remoção de espaços; padronização de `Artichoke` para `Artichokes`; "
@@ -1697,7 +2386,8 @@ def main() -> None:
             "a pizzaria precisa registrar custos e quantidades de cada ingrediente por receita."
         )
 
-    csv_bytes = filtered.to_csv(index=False).encode("utf-8-sig")
+    csv_export = commercial_filtered.drop(columns=["order_key"], errors="ignore")
+    csv_bytes = csv_export.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         "Baixar vendas filtradas (CSV)",
         data=csv_bytes,

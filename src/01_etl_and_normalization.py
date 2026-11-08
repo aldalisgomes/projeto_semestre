@@ -1,7 +1,8 @@
+import os
 #%% 
 import pandas as pd
 from sqlalchemy import create_engine, text
-import urllib
+from urllib.parse import quote_plus
 
 df_orders = pd.read_csv('data/orders.csv')
 df_order_details = pd.read_csv('data/order_details.csv')
@@ -159,12 +160,19 @@ print("\n--- FIM DA AUDITORIA ---")
 #%% 
 # --- CARGA NO SQL SERVER (DOCKER) ---
 
-# Codificar caracteres especiais da senha para formar uma URL válida
-password_encoded = urllib.parse.quote_plus("SenhaForte@2026!")
+# Credenciais vêm do ambiente local (.env, fora do Git); nunca ficam no código.
+database_password = os.environ.get("MSSQL_SA_PASSWORD", "").strip()
+if not database_password:
+    raise SystemExit(
+        "Configure MSSQL_SA_PASSWORD no ambiente antes de executar a carga no SQL Server."
+    )
+password_encoded = quote_plus(database_password)
+database_host = os.environ.get("PIZZA_SQL_HOST", "pizza_sql_server")
+database_port = os.environ.get("PIZZA_SQL_PORT", "1433")
 
 # 1. Conexão inicial com master, necessária para executar o arquivo SQL de criação do banco
 connection_string_master = (
-    f"mssql+pyodbc://sa:{password_encoded}@pizza_sql_server:1433/master"
+    f"mssql+pyodbc://sa:{password_encoded}@{database_host}:{database_port}/master"
     "?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
 )
 engine_master = create_engine(connection_string_master)
@@ -200,7 +208,7 @@ print("[OK] Tabelas, chaves e restrições criadas.")
 
 # 2. Conexão com o banco PizzaSales recém-criado para inserir os dados
 connection_string_sales = (
-    f"mssql+pyodbc://sa:{password_encoded}@pizza_sql_server:1433/PizzaSales"
+    f"mssql+pyodbc://sa:{password_encoded}@{database_host}:{database_port}/PizzaSales"
     "?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
 )
 engine_sales = create_engine(connection_string_sales)

@@ -4,7 +4,7 @@ services:
     container_name: vesuvio_sql_server
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "SenhaForte@2026!"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Copie .env.example para .env e defina MSSQL_SA_PASSWORD}"
     ports:
       - "1433:1433"
     volumes:

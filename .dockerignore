@@ -1,0 +1,14 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+backups/
+LIXO/
+tmp/
+DOCUMENTOS/
+output/
+.env
+.env.*
+!.env.example
+.vscode/

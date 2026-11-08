@@ -1,0 +1,23 @@
+# Ambientes e artefatos Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Configurações e credenciais locais
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Dados comerciais externos, cópias de segurança e material de trabalho local
+output/
+backups/
+LIXO/
+tmp/
+DOCUMENTOS/
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+.vscode/
