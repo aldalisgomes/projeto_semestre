@@ -1,5 +1,8 @@
 import csv
 import io
+import shutil
+import sys
+import tempfile
 import unittest
 import warnings
 from pathlib import Path
@@ -55,17 +58,23 @@ class StreamlitImportUiTests(unittest.TestCase):
         source_radio = next(widget for widget in app.radio if widget.label == "Fonte dos dados")
         source_radio.set_value("Estudo de caso — VENDAS_PIZZARIA_BAIRRO").run()
         self.assertFalse(app.exception, [error.message for error in app.exception])
+        case_path = Path(__file__).resolve().parents[1] / "output" / "VENDAS_PIZZARIA_BAIRRO.csv"
         metrics = {metric.label: metric.value for metric in app.metric}
-        self.assertEqual(metrics["Pedidos"], "583")
-        self.assertEqual(metrics["Pizzas vendidas"], "845")
-        forecast = next(frame.value for frame in app.dataframe if getattr(frame.value, "shape", None) == (7, 7))
-        monday = forecast.loc[forecast["Dia"] == "segunda-feira"]
-        self.assertEqual(len(forecast), 7)
-        self.assertEqual(forecast["Data"].iloc[0], "01/10/2026")
-        self.assertEqual(forecast["Data"].iloc[-1], "07/10/2026")
-        self.assertEqual(len(monday), 1)
-        self.assertEqual(int(monday.iloc[0]["Previsão de pizzas"]), 0)
-        self.assertTrue((forecast["Previsão de pizzas"] >= 0).all())
+        if case_path.is_file():
+            self.assertEqual(metrics["Pedidos"], "583")
+            self.assertEqual(metrics["Pizzas vendidas"], "845")
+            forecast = next(frame.value for frame in app.dataframe if getattr(frame.value, "shape", None) == (7, 7))
+            monday = forecast.loc[forecast["Dia"] == "segunda-feira"]
+            self.assertEqual(len(forecast), 7)
+            self.assertEqual(forecast["Data"].iloc[0], "01/10/2026")
+            self.assertEqual(forecast["Data"].iloc[-1], "07/10/2026")
+            self.assertEqual(len(monday), 1)
+            self.assertEqual(int(monday.iloc[0]["Previsão de pizzas"]), 0)
+            self.assertTrue((forecast["Previsão de pizzas"] >= 0).all())
+        else:
+            self.assertTrue(any("CSV local do estudo de caso não está disponível" in str(warning.value) for warning in app.warning))
+            self.assertEqual(metrics["Pedidos"], "21.350")
+            self.assertEqual(metrics["Pizzas vendidas"], "49.574")
 
     def test_missing_optional_order_and_price_fields_keep_volume_only(self):
         content = (
@@ -110,6 +119,30 @@ class StreamlitImportUiTests(unittest.TestCase):
         self.assertEqual(metrics["Pedidos"], "2")
         self.assertEqual(metrics["Pizzas vendidas"], "5")
         self.assertEqual(metrics["Receita bruta"], "R$ 179,50")
+
+    def test_missing_case_study_falls_back_to_public_data_in_clean_clone(self):
+        project_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix="pizzeria-clean-clone-") as temporary:
+            clone = Path(temporary)
+            shutil.copytree(project_root / "src", clone / "src")
+            shutil.copytree(project_root / "data" / "normalized", clone / "data" / "normalized")
+            shutil.copytree(project_root / "docs", clone / "docs")
+            shutil.copy2(project_root / "03_analysis_queries.sql", clone / "03_analysis_queries.sql")
+            self.assertFalse((clone / "output" / "VENDAS_PIZZARIA_BAIRRO.csv").exists())
+            sys.path.insert(0, str(clone))
+            try:
+                dashboard_path = clone / "src" / "03_streamlit_dashboard.py"
+                app = AppTest.from_file(str(dashboard_path), default_timeout=120).run()
+                self.assertFalse(app.exception, [error.message for error in app.exception])
+                source_radio = next(widget for widget in app.radio if widget.label == "Fonte dos dados")
+                source_radio.set_value("Estudo de caso — VENDAS_PIZZARIA_BAIRRO").run()
+                self.assertFalse(app.exception, [error.message for error in app.exception])
+                self.assertTrue(any("CSV local do estudo de caso não está disponível" in str(warning.value) for warning in app.warning))
+                metrics = {metric.label: metric.value for metric in app.metric}
+                self.assertEqual(metrics["Pedidos"], "21.350")
+                self.assertEqual(metrics["Pizzas vendidas"], "49.574")
+            finally:
+                sys.path.remove(str(clone))
 
     @staticmethod
     def _confirm(app, label_fragment):

@@ -2,7 +2,7 @@
 
 Projeto Integrador IV da UNIVESP, desenvolvido em Python, SQL e Streamlit. O trabalho começou com o conjunto público **Pizza Place Sales**, utilizado para construir a modelagem relacional, o ETL, as consultas SQL e as análises. Depois, o painel foi ampliado para importar arquivos CSV de outros estabelecimentos. O estudo de caso da pizzaria de bairro demonstra essa extensão.
 
-As fontes são independentes: o conjunto público descreve vendas fictícias de 2015; o arquivo `VENDAS_PIZZARIA_BAIRRO.csv` contém dados reais do estabelecimento de estudo, com a identidade comercial omitida. O CSV comercial permanece local e não deve ser publicado sem autorização.
+As fontes são independentes: o conjunto público descreve vendas fictícias de 2015; o arquivo `VENDAS_PIZZARIA_BAIRRO.csv` contém dados reais do estabelecimento de estudo, com a identidade comercial omitida. Com autorização do responsável, o CSV do estudo de caso é distribuído neste repositório, separado da base pública.
 
 ## Objetivo e etapas
 
@@ -16,7 +16,7 @@ As fontes são independentes: o conjunto público descreve vendas fictícias de 
 | Fonte | Uso | Período e características |
 | --- | --- | --- |
 | Pizza Place Sales | Desenvolvimento e análises originais de SQL/ETL | 2015; quatro arquivos brutos e 48.620 linhas de itens. O desafio descreve um estabelecimento fictício. A página do Maven Data Playground lista a licença como Public Domain. |
-| `VENDAS_PIZZARIA_BAIRRO.csv` | Estudo de caso de aplicação em estabelecimento externo | 01/08/2026 a 30/09/2026; CSV local de vendas reais, com nome comercial omitido. Não é a base pública. |
+| `VENDAS_PIZZARIA_BAIRRO.csv` | Estudo de caso de aplicação em estabelecimento externo | 01/08/2026 a 30/09/2026; dados reais com nome comercial omitido, distribuídos com autorização. Não é a base pública. |
 | CSV enviado pelo usuário | Análise personalizada | Período, cardápio e funcionamento dependem do arquivo e da configuração informada pelo usuário. |
 
 Referências da base pública: [Maven Pizza Challenge](https://mavenanalytics.io/challenges/maven-pizza-challenge) e [Pizza Place Sales — Maven Data Playground](https://status.mavenanalytics.io/data-playground/pizza-place-sales). Confira a licença e os termos na fonte antes de redistribuir os arquivos.
@@ -31,7 +31,7 @@ As consultas em `03_analysis_queries.sql` demonstram filtros, `JOIN`s, agregaç�
 
 Os indicadores comerciais derivam de somas e agrupamentos por pedido, produto, categoria, tamanho, data, dia da semana e horário. Receita bruta é `Σ(quantidade × preço unitário)`; não representa lucro. A análise de ingredientes associa vendas à lista de ingredientes cadastrada, mas não estima gramagem, custo ou consumo físico.
 
-A previsão existente usa regressão linear com variáveis de calendário e histórico (`weekday`, índice temporal, `lag_7d`, média móvel de sete dias, indicador do início do mês e componentes cíclicos mensais). A avaliação cronológica usa MAE, RMSE, R² e comparação com a referência `lag_7d`. O painel exige 56 dias completos para treinar e apresenta sete dias futuros; a faixa `previsão ± MAE` é indicativa, não intervalo de confiança. 
+A previsão existente usa regressão linear com variáveis de calendário e histórico (`weekday`, índice temporal, `lag_7d`, média móvel de sete dias, indicador do início do mês e componentes cíclicos mensais). A avaliação cronológica usa MAE, RMSE, R² e comparação com a referência `lag_7d`. O painel exige 56 dias completos para treinar e apresenta sete dias futuros; a faixa `previsão ± MAE` é indicativa, não intervalo de confiança.
 
 ## Aplicação Streamlit
 
@@ -62,7 +62,7 @@ No CSV simples, `data` e `quantidade` são necessários para a série de vendas;
 ├── requirements.txt
 ```
 
-O arquivo local `output/VENDAS_PIZZARIA_BAIRRO.csv`,  backups e configurações `.env` são ignorados pelo Git. A aplicação em modo de estudo de caso exige que o CSV esteja nesse caminho local. Em Docker, `make dashboard-docker` monta `output/` como volume somente leitura, sem copiar os dados comerciais para a imagem.
+O arquivo `output/VENDAS_PIZZARIA_BAIRRO.csv` é versionado para reproduzir o estudo de caso; a identidade comercial foi omitida. Backups, outros arquivos de saída e configurações `.env` permanecem ignorados pelo Git. Se o CSV for removido de uma instalação local, o painel informa a limitação e mantém a base pública disponível. Em Docker, `make dashboard-docker` monta `output/` somente para leitura e monta `data/normalized/` somente para leitura após exportar os arquivos atualizados, evitando depender da cópia incorporada à imagem.
 
 ## Instalação e execução no Windows
 
@@ -80,7 +80,11 @@ O comando `python -m streamlit` executa pelo interpretador do ambiente virtual. 
 
 O serviço SQL Server é executado em container e persiste seus dados no volume `vesuvio_sqlserver_data`. O `Dockerfile` monta a imagem Python usada pelo ETL e pelo painel; o Streamlit pode ser executado dentro de um container efêmero conectado à rede do Compose. O serviço e o painel se comunicam pela rede Compose; a porta 1433 é publicada para acesso local e o painel expõe 8501.
 
-O Makefile usa GNU Make, Bash, Docker Engine/Compose v2 e, no Windows, WSL2 com integração ao Docker Desktop. Antes de usar SQL Server, copie `.env.example` para `.env`, substitua a senha de exemplo e ajuste as URLs. O `.env` não é versionado.
+O Makefile usa GNU Make, Bash, Docker Engine/Compose v2 e, no Windows, WSL2 com integração ao Docker Desktop. O arquivo `.env` fica na raiz do repositório e não é versionado. Para preparar o ambiente no PowerShell, execute `Copy-Item .env.example .env` e substitua `MSSQL_SA_PASSWORD` por uma senha local forte. As URLs de conexão são opcionais quando o painel usa os CSVs normalizados; configure-as somente se quiser conexão direta ao SQL Server.
+
+Para conferir a configuração Compose sem iniciar containers, na raiz execute `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml config --quiet`. Para uma instalação local nova, inicie com `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml up -d` e confira `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml ps`. O SQL Server está pronto quando os logs de `pizza_sql_server` exibirem “SQL Server is now ready for client connections”; acompanhe com `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml logs -f pizza_sql_server`.
+
+**Atenção:** o projeto `vesuvio` pode reutilizar o volume Compose `vesuvio_vesuvio_sqlserver_data` já existente neste computador. Não execute `up`, `make db-up`, `make run` ou `make all` em uma instalação que contenha dados importantes sem antes verificar e proteger os recursos. `make run`/`make all` carregam o banco de demonstração e recriam `PizzaSales`; não são fluxos de produção.
 
 Alvos existentes: `help`, `setup`, `db-up`, `db-down`, `run`, `normalize`, `dashboard`, `dashboard-docker`, `all` e `clean`. `make run` e `make all` executam o ETL demonstrativo, que recria o banco `PizzaSales`; não use essa carga em um banco de produção. `make clean` apaga somente os caches `__pycache__`. Detalhes e pré-requisitos estão no manual.
 

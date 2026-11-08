@@ -1,0 +1,4 @@
+data,quantidade,pedido_id,hora,produto,tamanho,preco_unitario,categoria,ingredientes
+2026-01-15,2,1001,18:30,Calabresa,M,35.90,Tradicional,"Molho; queijo; calabresa"
+2026-01-15,1,1001,18:30,Margherita,M,32.00,Vegetariana,"Molho; queijo; tomate"
+2026-01-15,1,1002,19:15,Nutella,G,65.00,Doce,"Creme de avelã"

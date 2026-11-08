@@ -1495,6 +1495,13 @@ def main() -> None:
                 MODE_SQL_SERVER,
             ],
         )
+        if source == MODE_CASE_STUDY and not CASE_STUDY_CSV_PATH.is_file():
+            st.warning(
+                "O CSV local do estudo de caso não está disponível neste clone. "
+                "As análises continuam usando a base pública; coloque o arquivo autorizado "
+                "em output/VENDAS_PIZZARIA_BAIRRO.csv para habilitar o estudo de caso."
+            )
+            source = MODE_PUBLIC
         uploaded: dict[str, object] = {}
         single_csv = None
         database_url = ""

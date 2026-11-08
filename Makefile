@@ -22,7 +22,7 @@ OPEN_BROWSER = nohup bash -c 'open_browser() { if command -v explorer.exe >/dev/
 help: ## Exibe os comandos disponíveis
 	@echo "Uso: make [alvo]"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | awk -F '## ' '{split($$1, target, ":"); printf "  %-18s %s\n", target[1], $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(firstword $(MAKEFILE_LIST)) | awk -F '## ' '{split($$1, target, ":"); printf "  %-18s %s\n", target[1], $$2}'
 
 setup: ## Cria o ambiente virtual local e instala as dependências do projeto
 	$(PYTHON) -m venv .venv
@@ -62,7 +62,7 @@ dashboard-docker: db-up ## Exporta os CSVs e inicia o Streamlit no Docker (não 
 	@mkdir -p data/normalized output
 	docker run --rm -v "$(CURDIR)/data:/app/data" $(IMAGE_NAME) python src/04_exportar_base_normalizada.py
 	@$(OPEN_BROWSER)
-	docker run --rm --network $(PROJECT_NAME)_default -p $(STREAMLIT_PORT):8501 -v "$(CURDIR)/output:/app/output:ro" -e PIZZA_DATABASE_URL='$(PIZZA_DATABASE_URL_DOCKER)' $(IMAGE_NAME) streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+	docker run --rm --network $(PROJECT_NAME)_default -p $(STREAMLIT_PORT):8501 -v "$(CURDIR)/output:/app/output:ro" -v "$(CURDIR)/data/normalized:/app/data/normalized:ro" -e PIZZA_DATABASE_URL='$(PIZZA_DATABASE_URL_DOCKER)' $(IMAGE_NAME) streamlit run src/03_streamlit_dashboard.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
 
 all: db-up run dashboard-docker ## Demonstração completa: SQL Server, ETL, tabelas normalizadas e painel Docker
 	@:
