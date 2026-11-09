@@ -57,7 +57,38 @@ cp .env.example .env
 nano .env
 ~~~
 
-Defina um valor local para MSSQL_SA_PASSWORD [Use as setas do teclado para levar o cursor até a linha da senha (ex: DB_PASSWORD= ou MSSQL_SA_PASSWORD=) e digite a senha desejada NAS 3 LINHAS,substituindo, inclusive o %21.Para salvar e sair: aperte Ctrl + O, depois aperte Enter para confirmar o nome do arquivo, e por fim aperte Ctrl + X para fechar o editor., rode cat .env no terminal e confira se a senha está posicionada exatamente entre sa: e @.]. Use uma senha forte que atenda aos requisitos do SQL Server e anote-a: você a informará no perfil de conexão do VS Code. Não publique o arquivo .env nem use uma senha de outro serviço. O arquivo .env é ignorado pelo Git.
+#### Preencher as três referências à senha
+
+No template deste projeto, a variável principal chama-se MSSQL_SA_PASSWORD. Localize-a com as setas do teclado no nano e substitua o valor de exemplo pela senha que deseja usar. Alguns projetos usam nomes como DB_PASSWORD, mas este projeto utiliza MSSQL_SA_PASSWORD.
+
+O arquivo também contém duas URLs opcionais para conexão direta do Streamlit ao SQL Server. Se quiser usar essa conexão, coloque a mesma senha nas três configurações:
+
+1. MSSQL_SA_PASSWORD.
+2. PIZZA_DATABASE_URL.
+3. PIZZA_DATABASE_URL_DOCKER.
+
+Nas duas URLs, a senha fica entre sa: e @. Como esses campos são URLs, caracteres especiais precisam ser codificados. Por exemplo, o caractere ! deve aparecer como %21. Ao substituir o valor de exemplo, atualize ou remova o %21 conforme a senha escolhida; se a senha tiver outros caracteres especiais, codifique-os também. Assim, não deixe nas URLs uma senha diferente da variável MSSQL_SA_PASSWORD.
+
+Para salvar no nano, pressione Ctrl+O, Enter para confirmar o nome do arquivo e Ctrl+X para sair. Para conferir as linhas localmente, execute:
+
+~~~bash
+cat .env
+~~~
+
+Confira se MSSQL_SA_PASSWORD contém a senha escolhida e se, nas URLs, ela aparece entre sa: e @. A saída mostra os valores locais do arquivo; não publique nem envie esse conteúdo.
+
+#### Requisitos da senha
+
+Por padrão, a senha do SQL Server deve ter entre 8 e 128 caracteres e incluir caracteres de pelo menos três destes quatro grupos:
+
+- Letras maiúsculas (A a Z).
+- Letras minúsculas (a a z).
+- Números (0 a 9).
+- Símbolos ou caracteres especiais, como _, - e !.
+
+Se a senha não atender a essa política, o container pode não concluir a inicialização. Consulte a [política de senha para containers do SQL Server](https://learn.microsoft.com/sql/linux/containers/deploy?view=sql-server-ver16).
+
+Anote a senha configurada: você precisará informá-la no perfil de conexão do VS Code. Não publique o arquivo .env nem reutilize uma senha de outro serviço. O arquivo .env é ignorado pelo Git.
 
 Para executar as consultas no VS Code, basta a variável MSSQL_SA_PASSWORD. As variáveis PIZZA_DATABASE_URL e PIZZA_DATABASE_URL_DOCKER são opcionais e servem para o Streamlit se conectar diretamente ao SQL Server; não são usadas pelo perfil de conexão manual do VS Code. Se alterar a senha e quiser essa conexão direta no painel, atualize as URLs com a senha codificada para uso em URL. Para o painel com os CSVs normalizados, essas URLs podem ficar vazias.
 
