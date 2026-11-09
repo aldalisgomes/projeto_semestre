@@ -1,110 +1,274 @@
 # Painel de Análise de Dados para Pizzarias
 
-Projeto Integrador IV da UNIVESP, desenvolvido em Python, SQL e Streamlit. O trabalho começou com o conjunto público **Pizza Place Sales**, utilizado para construir a modelagem relacional, o ETL, as consultas SQL e as análises. Depois, o painel foi ampliado para importar arquivos CSV de outros estabelecimentos. O estudo de caso da pizzaria de bairro demonstra essa extensão.
+Projeto Integrador IV da UNIVESP, desenvolvido em Python, SQL e Streamlit. O projeto começou com o conjunto público Pizza Place Sales, utilizado para desenvolver a modelagem relacional, o ETL, as consultas SQL e as análises. Depois, o painel foi ampliado para permitir que outras pizzarias analisem seus próprios arquivos CSV. O conjunto VENDAS_PIZZARIA_BAIRRO.csv é o estudo de caso dessa ampliação.
 
-As fontes são independentes: o conjunto público descreve vendas fictícias de 2015; o arquivo `VENDAS_PIZZARIA_BAIRRO.csv` contém dados reais do estabelecimento de estudo, com a identidade comercial omitida. Com autorização do responsável, o CSV do estudo de caso é distribuído neste repositório, separado da base pública.
+As fontes são independentes. Pizza Place Sales é uma base pública de demonstração, com registros de 2015. VENDAS_PIZZARIA_BAIRRO.csv contém os dados do estabelecimento usado no estudo de caso, com sua identidade comercial omitida. Um arquivo carregado pelo usuário constitui uma terceira fonte independente.
 
-## Objetivo e etapas
+## Executar as consultas SQL no VS Code
 
-1. Inspecionar e organizar dados públicos de pedidos, itens, produtos e receitas.
-2. Normalizar o esquema em sete tabelas, implementar ETL e consultas SQL analíticas.
-3. Apresentar indicadores, gráficos, filtros e previsão diária no Streamlit.
-4. Permitir a importação guiada de dados de outras pizzarias, com diagnóstico de qualidade, calendário configurável e análises habilitadas conforme os campos disponíveis.
+Esta seção apresenta o caminho completo para clonar o projeto no Windows com WSL2/Ubuntu, iniciar o SQL Server pelo Docker, carregar a base pública e executar as consultas no VS Code. Os comandos de terminal devem ser executados no Ubuntu/WSL, na pasta do projeto. O VS Code é usado para editar e executar o arquivo SQL.
 
-## Fontes de dados
+### 1. Pré-requisitos
 
-| Fonte | Uso | Período e características |
+- Windows 10/11 com WSL2 e uma distribuição Ubuntu.
+- Docker Desktop configurado para usar containers Linux e com integração habilitada para Ubuntu em Settings > Resources > WSL Integration.
+- Git, GNU Make e Bash disponíveis no Ubuntu.
+- Visual Studio Code para Windows e a extensão WSL da Microsoft.
+- Extensão SQL Server (mssql), da Microsoft, instalada no VS Code. Em uma janela conectada ao WSL, instale-a também no ambiente WSL, se o VS Code solicitar.
+
+Documentação oficial: [instalar WSL](https://learn.microsoft.com/windows/wsl/install/), [desenvolver no WSL com VS Code](https://code.visualstudio.com/docs/remote/wsl), [integração WSL do Docker Desktop](https://docs.docker.com/desktop/features/wsl/) e [extensão MSSQL para VS Code](https://learn.microsoft.com/sql/tools/visual-studio-code-extensions/mssql/mssql-extension-visual-studio-code).
+
+Abra Ubuntu e confira se as ferramentas estão disponíveis:
+
+~~~bash
+git --version
+make --version
+docker version
+docker compose version
+~~~
+
+Em docker version, confira se aparecem informações do cliente e do servidor. Se docker não conseguir falar com o servidor, abra o Docker Desktop no Windows e habilite a integração com Ubuntu antes de continuar. Se make estiver ausente, instale-o no Ubuntu:
+
+~~~bash
+sudo apt update
+sudo apt install -y git make
+~~~
+
+### 2. Clonar a branch de entrega e abrir no VS Code
+
+Execute no terminal Ubuntu. O exemplo guarda o clone no sistema de arquivos Linux do WSL, em vez de uma pasta montada do Windows.
+
+~~~bash
+mkdir -p ~/projetos
+cd ~/projetos
+git clone --branch versao-final --single-branch https://github.com/aldalisgomes/projeto_semestre.git
+cd projeto_semestre
+code .
+~~~
+
+O VS Code deve abrir uma janela conectada ao WSL. Confirme o indicador WSL: Ubuntu no canto inferior esquerdo. O terminal integrado dessa janela também será Ubuntu; os comandos abaixo podem ser executados nele ou no terminal Ubuntu separado.
+
+### 3. Configurar a senha local do SQL Server
+
+Na raiz do clone, crie a configuração local a partir do modelo:
+
+~~~bash
+cp .env.example .env
+nano .env
+~~~
+
+Defina um valor local para MSSQL_SA_PASSWORD. Use uma senha forte que atenda aos requisitos do SQL Server e anote-a: você a informará no perfil de conexão do VS Code. Não publique o arquivo .env nem use uma senha de outro serviço. O arquivo .env é ignorado pelo Git.
+
+Para executar as consultas no VS Code, basta a variável MSSQL_SA_PASSWORD. As variáveis PIZZA_DATABASE_URL e PIZZA_DATABASE_URL_DOCKER são opcionais e servem para o Streamlit se conectar diretamente ao SQL Server; não são usadas pelo perfil de conexão manual do VS Code. Se alterar a senha e quiser essa conexão direta no painel, atualize as URLs com a senha codificada para uso em URL. Para o painel com os CSVs normalizados, essas URLs podem ficar vazias.
+
+### 4. Verificar se já há recursos com os nomes do projeto
+
+O Compose e o Makefile usam o nome de projeto vesuvio, o container vesuvio_sql_server e o volume vesuvio_vesuvio_sqlserver_data. O volume persiste o banco entre inicializações. Em uma máquina sem uma execução anterior do projeto, não deve haver recursos existentes com esses nomes.
+
+Antes de carregar o banco, confira:
+
+~~~bash
+docker ps -a --filter name=vesuvio_sql_server --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+docker volume ls --filter name=vesuvio_vesuvio_sqlserver_data
+~~~
+
+Se já existir esse container ou volume, verifique se é o ambiente descartável deste projeto antes de prosseguir. Não execute o carregamento abaixo sobre um SQL Server ou volume que contenha dados que você queira preservar.
+
+Se você já tiver o container deste projeto e quiser apenas consultar o banco existente, não execute make run. Conecte-se ao SQL Server em localhost, porta 1433, usando a senha originalmente configurada. No VS Code, comece pelo banco master e consulte:
+
+~~~sql
+SELECT name
+FROM sys.databases
+ORDER BY name;
+~~~
+
+Se PizzaSales já existir e contiver as tabelas do projeto, siga diretamente para as etapas de conexão e execução das consultas. O alvo make run é necessário somente para criar/recarregar a base pública em uma instância descartável.
+
+### 5. Iniciar o SQL Server e carregar a base pública
+
+Na raiz do repositório, execute:
+
+~~~bash
+make help
+make run
+~~~
+
+make run depende de make db-up: inicia o SQL Server pelo Docker Compose, aguarda o serviço ficar pronto, constrói a imagem do ETL e carrega os dados públicos. Na carga, o script executa 02_create_tables_reference.sql, que contém DROP DATABASE IF EXISTS PizzaSales. Portanto, make run apaga e recria somente o banco PizzaSales no SQL Server ao qual o container se conecta. Use-o apenas em uma instância local descartável ou quando aceitar substituir esse banco. Não execute esse alvo em um banco de produção ou em um volume com dados que queira manter.
+
+Ao final, o ETL deve informar a conclusão da carga. A base contém 21.350 pedidos e 48.620 itens em order_details. O serviço SQL Server também fica acessível do Windows/WSL pela porta local 1433. Dentro da rede Docker, o nome do serviço é pizza_sql_server; no VS Code, use localhost e a porta publicada.
+
+Se make run falhar porque a porta 1433 já está ocupada, confira os containers com docker ps -a. Não inicie dois SQL Servers que publiquem simultaneamente a mesma porta.
+
+### 6. Conectar o VS Code ao banco
+
+1. No VS Code aberto na janela WSL, instale SQL Server (mssql), da Microsoft. Abra a área de extensões e confira se aparece instalada em WSL: Ubuntu.
+2. Abra a paleta de comandos com Ctrl+Shift+P e execute MS SQL: Connect.
+3. Crie um perfil de conexão com estes valores:
+   - Server name: localhost
+   - Port: 1433
+   - Authentication type: SQL Login
+   - User name: sa
+   - Password: o mesmo valor configurado em MSSQL_SA_PASSWORD no arquivo .env
+   - Trust server certificate: habilitado
+   - Database name: PizzaSales
+4. Se o VS Code não conseguir carregar a lista de bancos, informe PizzaSales diretamente no campo Database name. Para testar a conexão antes de carregar a base, use master.
+5. Use Test connection e, se aprovado, Connect.
+
+Se a mensagem for Login failed for user 'sa', o servidor foi alcançado, mas a senha não corresponde à senha definida quando aquele SQL Server/volume foi inicializado. Alterar o .env não troca a senha de um volume já existente. Use a senha original desse volume ou configure uma instância de teste nova; não remova o volume para tentar corrigir a senha.
+
+### 7. Executar as consultas
+
+No VS Code, abra 03_analysis_queries.sql. O script começa selecionando PizzaSales e contém consultas analíticas de leitura da base pública. Ele utiliza a sintaxe T-SQL do SQL Server, incluindo separadores GO. Não execute 02_create_tables_reference.sql como se fosse um conjunto de consultas: esse arquivo recria o banco. A criação e a carga descritas acima são feitas pelo alvo make run.
+
+Confirme que a conexão está selecionada para o editor. Clique dentro da área de texto do arquivo SQL e então:
+
+- Pressione Ctrl+Shift+E; ou
+- Abra Ctrl+Shift+P e execute MS SQL: Execute Query.
+
+Se aparecer “A SQL editor must have focus before executing this command”, o foco está fora do editor SQL: clique dentro do texto de 03_analysis_queries.sql e execute novamente. Se executar uma consulta selecionada, somente a seleção será enviada; sem seleção, a extensão executa a instrução atual ou o conteúdo do editor conforme o comando utilizado.
+
+Para conferir a carga, execute no editor:
+
+~~~sql
+USE PizzaSales;
+GO
+
+SELECT COUNT(*) AS total_pedidos
+FROM dbo.orders;
+
+SELECT COUNT(*) AS total_itens
+FROM dbo.order_details;
+~~~
+
+Os resultados esperados são 21.350 em total_pedidos e 48.620 em total_itens. Depois, execute as consultas de 03_analysis_queries.sql individualmente ou em conjunto. Os resultados SQL referem-se à base pública Pizza Place Sales, não ao estudo de caso da pizzaria de bairro.
+
+### Encerrar o ambiente Docker
+
+Quando terminar, o comando abaixo para e remove o container e a rede do Compose, mas preserva o volume de dados:
+
+~~~bash
+make db-down
+~~~
+
+Não acrescente a opção -v ao comando Docker Compose down: ela remove o volume persistente. Manter o volume permite que o banco continue disponível na próxima inicialização.
+
+## Visão geral do projeto
+
+### Fontes de dados
+
+| Fonte | Uso | Características |
 | --- | --- | --- |
-| Pizza Place Sales | Desenvolvimento e análises originais de SQL/ETL | 2015; quatro arquivos brutos e 48.620 linhas de itens. O desafio descreve um estabelecimento fictício. A página do Maven Data Playground lista a licença como Public Domain. |
-| `VENDAS_PIZZARIA_BAIRRO.csv` | Estudo de caso de aplicação em estabelecimento externo | 01/08/2026 a 30/09/2026; dados reais com nome comercial omitido, distribuídos com autorização. Não é a base pública. |
-| CSV enviado pelo usuário | Análise personalizada | Período, cardápio e funcionamento dependem do arquivo e da configuração informada pelo usuário. |
+| Pizza Place Sales | Desenvolvimento original, ETL, modelagem e consultas SQL | Conjunto público de vendas de 2015; quatro arquivos brutos e 48.620 linhas de itens. A descrição do desafio caracteriza o estabelecimento como fictício. |
+| VENDAS_PIZZARIA_BAIRRO.csv | Estudo de caso de análise personalizada | Dados do estabelecimento de bairro, com identidade comercial omitida; período registrado no arquivo de 01/08/2026 a 30/09/2026. |
+| CSV enviado pelo usuário | Análise personalizada | Período, produtos, tamanhos, categorias e calendário dependem do arquivo enviado e das informações fornecidas pelo usuário. |
 
-Referências da base pública: [Maven Pizza Challenge](https://mavenanalytics.io/challenges/maven-pizza-challenge) e [Pizza Place Sales — Maven Data Playground](https://status.mavenanalytics.io/data-playground/pizza-place-sales). Confira a licença e os termos na fonte antes de redistribuir os arquivos.
+Referências consultadas para Pizza Place Sales: [Maven Pizza Challenge](https://mavenanalytics.io/challenges/maven-pizza-challenge) e [Pizza Place Sales no Maven Data Playground](https://status.mavenanalytics.io/data-playground/pizza-place-sales). A página do Data Playground informa a licença como Public Domain; confira os termos na fonte antes de redistribuir arquivos.
 
-## Modelagem, ETL e análises
+### Modelagem, ETL e SQL
 
-O esquema relacional contém `orders`, `order_details`, `pizzas`, `pizza_types`, `categories`, `ingredients` e `pizza_type_ingredients`. A lista de ingredientes é decomposta em registros atômicos (1FN); categorias e ingredientes usam dimensões e chaves estrangeiras para reduzir repetição. O esquema público conserva as restrições ligadas ao conjunto de 2015, inclusive os tamanhos S, M, L, XL e XXL.
+O esquema relacional público contém sete tabelas: categories, pizza_types, ingredients, pizza_type_ingredients, pizzas, orders e order_details. A lista de ingredientes é decomposta em registros atômicos. O esquema inclui chaves primárias e estrangeiras e restrições próprias da fonte pública, incluindo tamanhos S, M, L, XL e XXL e datas de 2015. Essas regras não são aplicadas ao CSV externo da pizzaria.
 
-O ETL lê os quatro CSVs públicos, trata nomes e relações de ingredientes, audita campos e chaves, cria o esquema e carrega o SQL Server. O exportador também gera sete CSVs normalizados em `data/normalized/`, usados pelo painel e pelo adaptador SQLite em memória quando o SQL Server não está disponível.
+O ETL lê os quatro CSVs públicos em data/, prepara categorias e ingredientes, audita valores e relacionamentos e carrega as tabelas no SQL Server. O exportador src/04_exportar_base_normalizada.py gera sete CSVs em data/normalized/. O painel usa esses dados para análises locais e pode executar consultas compatíveis por meio de SQLite em memória quando a conexão direta ao SQL Server não estiver disponível.
 
-As consultas em `03_analysis_queries.sql` demonstram filtros, `JOIN`s, agregações, subconsultas, operações de conjuntos, CTEs, função de janela, autojunção e `HAVING`. São consultas da base pública; o CSV externo não é redirecionado para esse esquema.
+O arquivo 03_analysis_queries.sql reúne exemplos com WHERE, LIKE, IN, BETWEEN, JOINs, GROUP BY, agregações, subconsultas, operações de conjuntos, CTEs, função de janela, autojunção e HAVING. Essas consultas pertencem à base pública. Elas não utilizam o CSV da pizzaria de bairro.
 
-Os indicadores comerciais derivam de somas e agrupamentos por pedido, produto, categoria, tamanho, data, dia da semana e horário. Receita bruta é `Σ(quantidade × preço unitário)`; não representa lucro. A análise de ingredientes associa vendas à lista de ingredientes cadastrada, mas não estima gramagem, custo ou consumo físico.
+### Indicadores e previsão
 
-A previsão existente usa regressão linear com variáveis de calendário e histórico (`weekday`, índice temporal, `lag_7d`, média móvel de sete dias, indicador do início do mês e componentes cíclicos mensais). A avaliação cronológica usa MAE, RMSE, R² e comparação com a referência `lag_7d`. O painel exige 56 dias completos para treinar e apresenta sete dias futuros; a faixa `previsão ± MAE` é indicativa, não intervalo de confiança.
+O painel apresenta agregações por pedido, produto, categoria, tamanho, data, dia da semana e horário. O faturamento bruto é calculado pela soma de quantidade multiplicada pelo preço unitário; não representa lucro. A análise de ingredientes associa itens vendidos às composições cadastradas, mas não estima gramagem, custo ou consumo físico.
 
-## Aplicação Streamlit
+A previsão diária usa regressão linear com variáveis de calendário e histórico: dia da semana, índice temporal, vendas defasadas em sete dias, média móvel dos sete dias anteriores, indicador do início do mês e componentes cíclicos mensais. A avaliação cronológica apresenta MAE, RMSE, R² e comparação com a referência da semana anterior. O painel requer 56 dias completos para treinamento e apresenta um horizonte de sete dias. A faixa previsão ± MAE é indicativa, não é intervalo de confiança.
 
-O painel separa a base pública, o estudo de caso, a importação de um CSV, o envio de quatro tabelas relacionais e a conexão somente para leitura ao SQL Server. As abas incluem visão geral, cardápio, picos de demanda, ingredientes, previsão, avaliação do modelo, consultas SQL e fontes de dados. Títulos e indicadores identificam a fonte selecionada.
+### Aplicação Streamlit e estudo de caso
 
-URL de demonstração registrada nos materiais do projeto: [painel-pizzaria.streamlit.app](https://painel-pizzaria.streamlit.app/). A  demonstração publicada deve usar a base pública ou um CSV carregado pelo usuário.
+O painel separa a base pública, o estudo de caso e arquivos enviados pelo usuário. Inclui visão geral, cardápio, picos de demanda, ingredientes, previsão, avaliação do modelo, consultas analíticas e fontes de dados. Títulos e indicadores identificam a fonte usada. A receita calculada não é lucro; análises de ingredientes dependem dos dados disponíveis.
 
-No CSV simples, `data` e `quantidade` são necessários para a série de vendas; as análises de pedidos, receita, produtos, categorias, tamanhos, horários e ingredientes dependem dos respectivos campos. O diagnóstico sinaliza datas inválidas, valores numéricos, cabeçalhos, pedidos inconsistentes, linhas aparentemente repetidas e lacunas de calendário. Linhas repetidas são apenas avisadas: não há exclusão automática. Dias fechados e dias abertos sem vendas são tratados segundo o calendário e a confirmação do responsável.
+O CSV de referência para outros estabelecimentos está em docs/modelo_csv_vendas_pizzaria.csv. As orientações de preenchimento estão em docs/modelo_csv_vendas_pizzaria.md. O cabeçalho de referência contém:
+
+~~~csv
+data,quantidade,pedido_id,hora,produto,tamanho,preco_unitario,categoria,ingredientes
+~~~
+
+Datas no formato AAAA-MM-DD são preferidas; datas no formato DD/MM/AAAA também são aceitas quando identificáveis sem ambiguidade. Quantidades comerciais devem ser inteiras e positivas. Um pedido pode aparecer em várias linhas quando contém diferentes itens. O sistema sinaliza possíveis linhas repetidas para conferência e não exclui vendas automaticamente. Análises dependem das colunas disponíveis; o diagnóstico informa limitações e inconsistências. Dias fechados, dias abertos sem registros e dias com vendas zero devem ser distinguidos conforme o calendário configurado pelo usuário.
 
 ### Estrutura principal
 
-```text
+~~~text
 .
 ├── data/                         # CSVs públicos e tabelas normalizadas
-├── docs/                         # Modelo de CSV, dicionário e relatórios de teste
+├── docs/                         # Modelo de CSV e orientação de preenchimento
 ├── docker/docker-compose.yml     # Serviço SQL Server
-├── src/
-│   ├── 01_etl_and_normalization.py
-│   ├── 02_regressao_linear_vendas_diarias.py
-│   ├── 03_streamlit_dashboard.py
-│   ├── 04_exportar_base_normalizada.py
-│   └── pizzeria_import.py
+├── src/                          # ETL, exportador, previsão, painel e importador
 ├── tests/                        # Testes do importador e da interface
 ├── 02_create_tables_reference.sql
 ├── 03_analysis_queries.sql
 ├── Dockerfile
 ├── Makefile
 ├── requirements.txt
-```
+└── README.md
+~~~
 
-O arquivo `output/VENDAS_PIZZARIA_BAIRRO.csv` é versionado para reproduzir o estudo de caso; a identidade comercial foi omitida. Backups, outros arquivos de saída e configurações `.env` permanecem ignorados pelo Git. Se o CSV for removido de uma instalação local, o painel informa a limitação e mantém a base pública disponível. Em Docker, `make dashboard-docker` monta `output/` somente para leitura e monta `data/normalized/` somente para leitura após exportar os arquivos atualizados, evitando depender da cópia incorporada à imagem.
+O CSV do estudo de caso é armazenado em output/VENDAS_PIZZARIA_BAIRRO.csv e distribuído com autorização, com o nome comercial omitido. Esse arquivo não é necessário para executar as consultas SQL da base pública. Se não estiver presente, o painel mantém a base pública disponível e informa que o estudo de caso não pode ser carregado.
 
-## Instalação e execução no Windows
+## Alvos do Makefile
 
-Abra PowerShell comum na raiz do repositório; não é necessário executá-lo como administrador.
+Execute os alvos no Ubuntu/WSL, na raiz do repositório:
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m streamlit run src/03_streamlit_dashboard.py
-```
+| Alvo | Função |
+| --- | --- |
+| make help | Exibe os alvos documentados. |
+| make setup | Cria .venv local e instala requirements.txt. |
+| make db-up | Inicia o SQL Server pelo Docker Compose e aguarda a disponibilidade. |
+| make db-down | Para e remove o container e a rede Compose, preservando o volume. |
+| make run | Inicia o SQL Server, constrói a imagem e executa o ETL; recria PizzaSales. |
+| make normalize | Instala dependências locais, se necessário, e gera os sete CSVs normalizados. |
+| make dashboard | Atualiza os CSVs e executa o painel localmente; requer dependências Python. |
+| make dashboard-docker | Exporta os CSVs e executa o painel em container. |
+| make all | Encadeia a carga do SQL Server e o painel Docker; inclui a recriação de PizzaSales. |
+| make clean | Remove diretórios de cache __pycache__ do Python. |
 
-O comando `python -m streamlit` executa pelo interpretador do ambiente virtual. Abra o endereço local informado no terminal (normalmente `http://localhost:8501`) e encerre com `Ctrl+C`. Para usar SQL Server, configure as variáveis de ambiente descritas no manual; para usar a base normalizada em CSV/SQLite, não é necessário configurar credenciais.
+Não é necessário executar make normalize antes de consultar o SQL Server: a carga SQL usa os quatro CSVs originais em data/. make normalize atualiza arquivos versionados em data/normalized/; por isso, confira git status depois de executá-lo.
 
-## Docker e Makefile
+## Executar o painel
 
-O serviço SQL Server é executado em container e persiste seus dados no volume `vesuvio_sqlserver_data`. O `Dockerfile` monta a imagem Python usada pelo ETL e pelo painel; o Streamlit pode ser executado dentro de um container efêmero conectado à rede do Compose. O serviço e o painel se comunicam pela rede Compose; a porta 1433 é publicada para acesso local e o painel expõe 8501.
+Para executar o painel localmente em Ubuntu/WSL:
 
-O Makefile usa GNU Make, Bash, Docker Engine/Compose v2 e, no Windows, WSL2 com integração ao Docker Desktop. O arquivo `.env` fica na raiz do repositório e não é versionado. Para preparar o ambiente no PowerShell, execute `Copy-Item .env.example .env` e substitua `MSSQL_SA_PASSWORD` por uma senha local forte. As URLs de conexão são opcionais quando o painel usa os CSVs normalizados; configure-as somente se quiser conexão direta ao SQL Server.
+~~~bash
+make setup
+make dashboard
+~~~
 
-Para conferir a configuração Compose sem iniciar containers, na raiz execute `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml config --quiet`. Para uma instalação local nova, inicie com `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml up -d` e confira `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml ps`. O SQL Server está pronto quando os logs de `pizza_sql_server` exibirem “SQL Server is now ready for client connections”; acompanhe com `docker compose --env-file .env --project-directory . -p vesuvio -f docker/docker-compose.yml logs -f pizza_sql_server`.
+O alvo cria o ambiente virtual local, instala as dependências, atualiza os CSVs normalizados e inicia o Streamlit. A URL local aparece no terminal. A conexão direta do painel ao SQL Server é opcional; sem ela, as análises públicas usam data/normalized/ e SQLite em memória.
 
-**Atenção:** o projeto `vesuvio` pode reutilizar o volume Compose `vesuvio_vesuvio_sqlserver_data` já existente neste computador. Não execute `up`, `make db-up`, `make run` ou `make all` em uma instalação que contenha dados importantes sem antes verificar e proteger os recursos. `make run`/`make all` carregam o banco de demonstração e recriam `PizzaSales`; não são fluxos de produção.
+Para executar o painel em container:
 
-Alvos existentes: `help`, `setup`, `db-up`, `db-down`, `run`, `normalize`, `dashboard`, `dashboard-docker`, `all` e `clean`. `make run` e `make all` executam o ETL demonstrativo, que recria o banco `PizzaSales`; não use essa carga em um banco de produção. `make clean` apaga somente os caches `__pycache__`. Detalhes e pré-requisitos estão no manual.
+~~~bash
+make dashboard-docker
+~~~
 
-## CSV para outras pizzarias
+O alvo requer Docker Desktop/Engine ativo. Ele exporta as tabelas normalizadas e inicia o Streamlit em um container; abra a URL local informada ou http://localhost:8501.
 
-Baixe o [modelo CSV](docs/modelo_csv_vendas_pizzaria.csv) e leia o [dicionário de campos](docs/modelo_csv_vendas_pizzaria.md). O cabeçalho de referência é:
+## Testes
 
-```csv
-data,quantidade,pedido_id,hora,produto,tamanho,preco_unitario,categoria,ingredientes
-```
+Na raiz do repositório, instale as dependências e execute:
 
-Datas ISO (`AAAA-MM-DD`) são preferidas; datas brasileiras (`DD/MM/AAAA`) também são aceitas quando identificáveis sem ambiguidade. `quantidade` deve ser inteira e positiva nas linhas comerciais; não use linhas comerciais de quantidade zero para representar fechamento. Repita `pedido_id` quando um pedido contiver diferentes itens. Preços devem ser numéricos e unitários. O painel permite configurar calendário e funcionamento por estabelecimento.
+~~~bash
+make setup
+.venv/bin/python -m unittest discover -s tests -v
+~~~
 
-## Testes e limitações
+## Limitações
 
-Com as dependências instaladas:
+- A previsão representa unidades vendidas, não receita, lucro ou consumo real de ingredientes.
+- O modelo de previsão não incorpora feriados, promoções, custos, margens ou capacidade de produção.
+- As análises personalizadas dependem dos campos presentes e da qualidade do CSV enviado.
+- A execução do SQL Server requer Docker com containers Linux e a porta local 1433 disponível.
+- O SQL Server guarda os dados no volume Compose. make db-down preserva esse volume; make run recria o banco PizzaSales dentro dele.
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
+## Referências de uso
 
-A avaliação da previsão depende de pelo menos 56 dias válidos. Feriados, promoções, custos, margens, desperdício e capacidade de produção não estão representados pelo modelo. A configuração e execução Docker precisam do serviço Docker ativo.
-
+- [Maven Pizza Challenge](https://mavenanalytics.io/challenges/maven-pizza-challenge)
+- [Pizza Place Sales — Maven Data Playground](https://status.mavenanalytics.io/data-playground/pizza-place-sales)
+- [WSL — documentação Microsoft](https://learn.microsoft.com/windows/wsl/install/)
+- [VS Code no WSL — documentação oficial](https://code.visualstudio.com/docs/remote/wsl)
+- [Docker Desktop e WSL 2 — documentação Docker](https://docs.docker.com/desktop/features/wsl/)
+- [MSSQL para VS Code — documentação Microsoft](https://learn.microsoft.com/sql/tools/visual-studio-code-extensions/mssql/mssql-extension-visual-studio-code)
