@@ -50,14 +50,14 @@ O VS Code deve abrir uma janela conectada ao WSL. Confirme o indicador WSL: Ubun
 
 ### 3. Configurar a senha local do SQL Server
 
-Na raiz do clone, crie a configuração local a partir do modelo:
+Na raiz do clone (ainda no terminal do Ubuntu), crie a configuração local a partir do modelo:
 
 ~~~bash
 cp .env.example .env
 nano .env
 ~~~
 
-Defina um valor local para MSSQL_SA_PASSWORD. Use uma senha forte que atenda aos requisitos do SQL Server e anote-a: você a informará no perfil de conexão do VS Code. Não publique o arquivo .env nem use uma senha de outro serviço. O arquivo .env é ignorado pelo Git.
+Defina um valor local para MSSQL_SA_PASSWORD [Use as setas do teclado para levar o cursor até a linha da senha (ex: DB_PASSWORD= ou MSSQL_SA_PASSWORD=) e digite a senha desejada NAS 3 LINHAS,substituindo, inclusive o %21.Para salvar e sair: aperte Ctrl + O, depois aperte Enter para confirmar o nome do arquivo, e por fim aperte Ctrl + X para fechar o editor., rode cat .env no terminal e confira se a senha está posicionada exatamente entre sa: e @.]. Use uma senha forte que atenda aos requisitos do SQL Server e anote-a: você a informará no perfil de conexão do VS Code. Não publique o arquivo .env nem use uma senha de outro serviço. O arquivo .env é ignorado pelo Git.
 
 Para executar as consultas no VS Code, basta a variável MSSQL_SA_PASSWORD. As variáveis PIZZA_DATABASE_URL e PIZZA_DATABASE_URL_DOCKER são opcionais e servem para o Streamlit se conectar diretamente ao SQL Server; não são usadas pelo perfil de conexão manual do VS Code. Se alterar a senha e quiser essa conexão direta no painel, atualize as URLs com a senha codificada para uso em URL. Para o painel com os CSVs normalizados, essas URLs podem ficar vazias.
 
